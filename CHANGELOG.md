@@ -6,6 +6,26 @@
 > released; this document reflects the current production codebase architecture and capabilities.
 
 
+### Token speed no longer reports a single flushed SSE frame as decode
+
+`computeTokensPerSec` reported `output_tokens / (lastEvent - firstContent)`
+whenever the window was wider than zero. Several bridges flush an entire
+completion inside one SSE frame, so `first` and `last` landed 1-8 ms apart and
+the division answered 8000-9125 tok/s for turns that really ran at 3-6 tok/s —
+the number measured how fast one frame crossed the network, not generation.
+
+A window narrower than `MIN_DECODE_WINDOW_MS` (500 ms) now counts as
+unobservable and falls through to end-to-end effective speed
+(`output_tokens / latency`), the same conservative fallback non-streaming rows
+already used. The threshold is read off production telemetry rather than
+picked: across 997 rows the median decode/e2e ratio is ~1.5x for windows over
+10 s, but 28x at 100-500 ms and 1834x under 10 ms, because below ~500 ms the
+"window" is one frame rather than generation time.
+
+Measured on the same 997 rows: the median barely moves (25.4 → 22.0 tok/s, so
+healthy rows are untouched) while the maximum falls from 9125 to 500.8 and the
+count above 1000 tok/s goes from 5 to 0.
+
 ### The console's cache columns measure the cached prefix, not the caching requests
 
 Two separate errors in the same family, both reading the same columns.

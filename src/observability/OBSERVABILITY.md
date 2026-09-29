@@ -141,12 +141,19 @@ batched `insertEvents` -> scheduled retention prune:
   optionally runs async `Bun.gc` and warns, each rate-limited to one per
   minute.
 - `computeTokensPerSec` (shared by ingress telemetry and provider probes) is
-  decode throughput: streaming requests with an observed token window report
-  `output_tokens / (lastEvent - firstContent)`; everything else (non-streaming
-  or degenerate windows) reports end-to-end `output_tokens / latency`, since
-  upstream decode inside TTFT is unobservable and the naive subtraction
-  produced absurd 7000+ tok/s rows. Returns `undefined` with no output tokens
-  or no elapsed time.
+  decode throughput: streaming requests whose observed token window is at
+  least `MIN_DECODE_WINDOW_MS` (500 ms) report
+  `output_tokens / (lastEvent - firstContent)`; everything else
+  (non-streaming, degenerate windows, or windows too narrow to be decode)
+  reports end-to-end `output_tokens / latency`, since upstream decode inside
+  TTFT is unobservable and the naive subtraction produced absurd 7000+ tok/s
+  rows. Several bridges flush a whole completion inside one SSE frame, leaving
+  `first` and `last` 1-8 ms apart — dividing by that span reported 8000-9125
+  tok/s for turns that really ran at a few tok/s, so a sub-threshold window
+  counts as unobservable too. The threshold comes from production telemetry:
+  the decode/e2e ratio is ~1.5x for windows over 10 s but 28x at 100-500 ms
+  and 1834x under 10 ms. Returns `undefined` with no output tokens or no
+  elapsed time.
 - `performance-metrics.ts` complements Prometheus with a directly-inspectable
   console snapshot (`adapter_load_ms`, `model_catalog_load_ms`,
   `network_call_latency_ms`, `memory_bytes`). Each series is capped at 256

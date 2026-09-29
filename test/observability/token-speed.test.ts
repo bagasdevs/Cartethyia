@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { computeTokensPerSec } from "../../src/observability/token-speed";
+import { computeTokensPerSec, MIN_DECODE_WINDOW_MS } from "../../src/observability/token-speed";
 
 describe("computeTokensPerSec", () => {
   test("streaming uses the observed decode window, excluding TTFT", () => {
@@ -13,6 +13,53 @@ describe("computeTokensPerSec", () => {
         lastEventAtMs: 2500,
       }),
     ).toBeCloseTo(66.67, 1);
+  });
+
+  test("a stream whose content arrives in one burst does not report burst speed", () => {
+    // Measured in production: a bridge that flushes the whole answer as one
+    // SSE frame leaves `first` and `last` 1-8ms apart, so dividing by that
+    // span reports 8000-9125 tok/s for a turn that really ran at ~3-6 tok/s.
+    // The decode phase happened upstream inside TTFT and is not observable,
+    // so the row must fall back to end-to-end effective speed.
+    expect(
+      computeTokensPerSec({
+        outputTokens: 73,
+        latencyMs: 11855,
+        stream: true,
+        firstContentDeltaAtMs: 1790671488636,
+        lastEventAtMs: 1790671488644,
+      }),
+    ).toBeCloseTo(6.16, 1);
+  });
+
+  test("the burst guard starts at the documented threshold, not before", () => {
+    const at = (decodeMs: number) =>
+      computeTokensPerSec({
+        outputTokens: 100,
+        latencyMs: 2000,
+        stream: true,
+        firstContentDeltaAtMs: 1000,
+        lastEventAtMs: 1000 + decodeMs,
+      });
+    // One millisecond under the threshold still reads as a burst; at it, the
+    // observed window is trusted.
+    expect(at(MIN_DECODE_WINDOW_MS - 1)).toBeCloseTo(50, 1);
+    expect(at(MIN_DECODE_WINDOW_MS)).toBeCloseTo(200, 1);
+  });
+
+  test("a real decode window narrower than the guard loses nothing measurable", () => {
+    // The guard cannot be gamed upward: a genuine 400ms decode of 300 tokens
+    // (750 tok/s) is implausible next to the same turn's end-to-end speed,
+    // so the conservative reading is the honest one.
+    const tps = computeTokensPerSec({
+      outputTokens: 300,
+      latencyMs: 1000,
+      stream: true,
+      firstContentDeltaAtMs: 1000,
+      lastEventAtMs: 1400,
+    });
+    expect(tps).toBeCloseTo(300, 1);
+    expect(tps).toBeLessThan(1000);
   });
 
   test("non-streaming falls back to end-to-end effective speed", () => {

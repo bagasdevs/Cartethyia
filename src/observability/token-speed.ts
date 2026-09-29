@@ -19,12 +19,19 @@
  * the first streamed content delta and the last stream event, so:
  * - streaming requests with an observed token window report true decode
  *   speed: `output_tokens / (lastEvent - firstContent)`;
- * - otherwise (non-streaming, or all content arriving in a single chunk)
- *   the decode phase happened upstream inside TTFT and is unobservable.
+ * - otherwise (non-streaming, or a window too narrow to be decode) the
+ *   decode phase happened upstream inside TTFT and is unobservable.
  *   Reporting `output / (latency - TTFT)` there divides by milliseconds of
  *   local overhead and produced absurd 7000+ tok/s rows, so those cases
  *   report end-to-end effective speed `output_tokens / latency` instead —
  *   a conservative lower bound that is always well-defined.
+ *
+ * The same guard covers a stream that flushes its whole answer in one burst:
+ * several bridges emit the entire completion inside a single SSE frame, so
+ * `first` and `last` land 1-8ms apart and dividing by that span reports
+ * 8000-9125 tok/s for a turn that really ran at a few tok/s. A window
+ * narrower than `MIN_DECODE_WINDOW_MS` therefore counts as unobservable too —
+ * it measures how fast one frame crossed the network, not decode.
  *
  * Note the `stream` gate matters beyond the degenerate-window fallback:
  * non-streaming dispatches also observe internal upstream-event timestamps,
@@ -45,6 +52,17 @@ export interface TokenSpeedInput {
 }
 
 /**
+ * Narrowest observed stream window that still counts as decode.
+ *
+ * Set from production telemetry: median decode/e2e speed ratio is ~1.5x for
+ * windows over 10s but 28x at 100-500ms and 1834x under 10ms, because under
+ * ~500ms the "window" is one flushed frame rather than generation time. 500ms
+ * of real decode is the shortest span that cannot be explained by a burst.
+ */
+export const MIN_DECODE_WINDOW_MS = 500;
+
+
+/**
  * Computes tokens/sec for one request, or `undefined` when there is nothing
  * meaningful to divide (no output tokens, or no elapsed time).
  */
@@ -56,7 +74,7 @@ export function computeTokensPerSec(input: TokenSpeedInput): number | undefined 
     const last = input.lastEventAtMs;
     if (first !== undefined && last !== undefined) {
       const decodeMs = last - first;
-      if (decodeMs > 0) return (outputTokens / decodeMs) * 1000;
+      if (decodeMs >= MIN_DECODE_WINDOW_MS) return (outputTokens / decodeMs) * 1000;
     }
   }
   if (input.latencyMs > 0) return (outputTokens / input.latencyMs) * 1000;
