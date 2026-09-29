@@ -5,6 +5,34 @@
 > All changes below are pre-release. Cartethyia has not been tagged or
 > released; this document reflects the current production codebase architecture and capabilities.
 
+
+### The console's cache columns measure the cached prefix, not the caching requests
+
+Two separate errors in the same family, both reading the same columns.
+
+`cachedTokens` was `sum(input_tokens) filter (where cached_input_tokens > 0)` — the
+whole prompt of every request that cached *anything*, so a 4594-token turn with a
+4352-token cached prefix contributed 4594 to "cached tokens" and overstated the
+cached volume by the uncached remainder. Every surface now sums `cached_input_tokens`
+itself: the summary card, the traffic chart's `cached` metric, each breakdown row,
+and `/system/usage/cache`.
+
+The hit rate never divided by the cached column at all. `usageSummary` divided by the
+period's total input, while `usageBy` and `usageCache` divided by `input + output` and
+system health divided by `input + output` too — so the number labelled "cache hit rate"
+measured the prompt/output split of the window and read a near-constant ~99% for any
+chat workload regardless of how much was actually served from cache. All of them now
+divide the cached sum by the input of the rows that reported a cache figure
+(`cacheHitRatePercent`), which is the only denominator that is honest: a row whose
+provider sent no cache breakdown is *unmeasured*, so it sits in neither half —
+counting it as a miss would report a lower rate for traffic that was simply never
+reported.
+
+The masked-IP re-aggregation in the `client_ip` breakdown carries that denominator
+alongside its cached sum, because the rate is not additive: two rows merging into one
+display name re-derive their rate from their combined figures rather than averaging.
+
+
 ### Graduated model-abuse strikes: warn, then ban
 
 A client that repeatedly requests a model outside its access — not in its

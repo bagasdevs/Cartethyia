@@ -44,6 +44,12 @@ export interface SystemHealthResponse {
   latency_avg_ms: number;
   latency_p95_ms: number;
   latency_p99_ms: number;
+  /**
+   * Share of the prompt that the upstream served from cache (0-100), over the
+   * rows that reported a cache figure. A row whose provider sent no breakdown
+   * is unmeasured and is excluded from both halves, so the rate never reads
+   * low for traffic that was simply not reported.
+   */
   cache_hit_rate_percent: number;
   avg_tokens_per_sec: number;
 }
@@ -63,6 +69,7 @@ export interface UsageResponse {
 export interface UsageSummaryTotals {
   requests: number;
   inputTokens: number;
+  /** Cached prefix tokens. Summed only over rows that reported a cache figure, so it is never the whole prompt of a caching request. */
   cachedTokens: number;
   outputTokens: number;
   /**
@@ -80,7 +87,7 @@ export interface UsageSummaryTotals {
   estimatedCostUsd: number;
   /** True when completed rows without persisted cost exist in the window. */
   partial: boolean;
-  /** Cache hit rate percentage (0-100). */
+  /** Cache hit rate percentage (0-100) over the rows that reported a cache figure. */
   cacheHitRate: number;
   /** Average tokens per second across the period. */
   avgTokensPerSec: number;
@@ -94,6 +101,7 @@ export interface UsageChartBucket {
   t: string;
   requests: number;
   input: number;
+  /** Cached prefix tokens in the bucket, not the bucket's whole input. */
   cached: number;
   output: number;
 }
@@ -105,6 +113,7 @@ export interface UsageByRow {
   requests: number;
   input: number;
   output: number;
+  /** Cached prefix tokens for the group, rate-able against its own measured input. */
   cached: number;
   total: number;
   errors: number;
@@ -112,7 +121,7 @@ export interface UsageByRow {
   costUsd: number | null;
   /** Resolved API key label for the `key` dimension; absent otherwise. */
   label?: string;
-  /** Cache hit rate percentage (0-100). */
+  /** Cache hit rate percentage (0-100) over the group's rows that reported a cache figure. */
   cacheHitRate: number;
   /** Average tokens per second for this dimension. */
   avgTokensPerSec: number;
@@ -132,6 +141,7 @@ export interface UsageByResponse {
 export interface UsageCacheResponse {
   period: string;
   inputTokens: number;
+  /** Cached prefix tokens, summed over the rows that reported a cache figure. */
   cachedTokens: number;
   /** Always zero: cache-write tokens are not tracked by the telemetry schema. */
   cacheWriteTokens: number;

@@ -389,6 +389,14 @@ prefix-length hints leave the store.
   `client_ip` dimension groups on the stored address and masks on read; because masking can
   collapse two hosts into one display name, rows that share a masked name are re-aggregated
   rather than shown twice.
+  **Cache columns measure the cached prefix.** `cachedTokens` (summary, chart bucket, breakdown
+  row, and `/system/usage/cache`) is the sum of `cached_input_tokens` over the rows that reported
+  one — not the whole prompt of the requests that happened to cache anything, which is what a
+  `sum(input_tokens) filter (where cached_input_tokens > 0)` read. Every cache-hit rate is that
+  sum over the input of the *same* rows (`cacheHitRatePercent`): a row whose provider sent no
+  cache breakdown is unmeasured, so it belongs in neither half — folding it into the denominator
+  reports a lower rate for traffic that was never measured, and dividing by `input + output`
+  measures the prompt/output split instead, which reads ~99% for any chat workload.
 - **Audit** (`audit/`) requires `platform:admin` plus a tenant: the store filters `tenant_id = ?
   OR (tenant_id IS NULL AND platform_admin)` with an opaque `(createdAt, id)` cursor and resolves
   stored actor UUIDs to human names.

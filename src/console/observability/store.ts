@@ -51,6 +51,21 @@ function mapTelemetryEventRow(event: typeof telemetryEvents.$inferSelect): Telem
     ...(event.lastEventAtMs !== null ? { lastEventAtMs: event.lastEventAtMs } : {}),
   };
 }
+
+/**
+ * Cache-hit percentage for one window: the cached prefix over the prompt of
+ * the rows that actually reported a cache figure.
+ *
+ * `cached` is a sum over rows carrying a non-NULL cached count, and `input`
+ * must be summed over the *same* rows — that is the whole point: a row whose
+ * provider reported no breakdown is unmeasured, not a miss, and folding its
+ * prompt into the denominator would report a lower rate for traffic that was
+ * never measured. Zero input leaves nothing to divide by, so the answer is 0
+ * rather than NaN reaching a JSON response.
+ */
+function cacheHitRatePercent(cached: number, input: number): number {
+  return input > 0 ? (cached / input) * 100 : 0;
+}
 function effectiveHttpStatusExpression() {
   return sql<number>`coalesce(
     ${telemetryEvents.httpStatus},
@@ -258,7 +273,6 @@ export class DrizzleObservabilityStore implements ObservabilityStore {
           p99: sql<number>`coalesce(percentile_cont(0.99) within group (order by ${telemetryEvents.latencyMs}), 0)`,
           cachedTokens: sql<number>`coalesce(sum(${telemetryEvents.cachedInputTokens}) filter (where ${telemetryEvents.cachedInputTokens} is not null), 0)`,
           inputTokens: sql<number>`coalesce(sum(${telemetryEvents.inputTokens}) filter (where ${telemetryEvents.cachedInputTokens} is not null), 0)`,
-          outputTokens: sql<number>`coalesce(sum(${telemetryEvents.outputTokens}) filter (where ${telemetryEvents.cachedInputTokens} is not null), 0)`,
           avgTokensPerSec: sql<number>`coalesce(avg(${telemetryEvents.tokensPerSec}) filter (where ${telemetryEvents.tokensPerSec} is not null), 0)`,
         })
         .from(telemetryEvents)
@@ -270,11 +284,14 @@ export class DrizzleObservabilityStore implements ObservabilityStore {
       p95 = Math.round(Number(row?.p95 ?? 0));
       p99 = Math.round(Number(row?.p99 ?? 0));
       const inputTokens = Number(row?.inputTokens ?? 0);
-      const outputTokens = Number(row?.outputTokens ?? 0);
-      // Prompt share of all tokens: the operator-facing cache column now
-      // leads with input, so a cached/input ratio would read a constant 100%.
-      const tokenTotal = inputTokens + outputTokens;
-      cacheHitRate = tokenTotal > 0 ? Math.round((inputTokens / tokenTotal) * 10000) / 100 : 0;
+      const cachedTokens = Number(row?.cachedTokens ?? 0);
+      // The cached prefix over the prompt of the rows that reported a cache
+      // figure. A row whose provider sent no breakdown is *unmeasured*, so its
+      // input is not in the denominator — counting it as a miss would drag the
+      // rate toward zero for traffic that simply was not reported. Dividing by
+      // input+output (the historical formula) measured the prompt/output split
+      // instead, which reads ~99% for any chat workload.
+      cacheHitRate = cacheHitRatePercent(cachedTokens, inputTokens);
       avgTokensPerSec = Number(row?.avgTokensPerSec ?? 0);
     } catch {
       databaseHealthy = false;
@@ -398,7 +415,11 @@ export class DrizzleObservabilityStore implements ObservabilityStore {
       .select({
         requests: sql<number>`count(*)`,
         inputTokens: sql<number>`coalesce(sum(${telemetryEvents.inputTokens}), 0)`,
-        cachedTokens: sql<number>`coalesce(sum(${telemetryEvents.inputTokens}) filter (where ${telemetryEvents.cachedInputTokens} > 0), 0)`,
+        cachedTokens: sql<number>`coalesce(sum(${telemetryEvents.cachedInputTokens}), 0)`,
+        // Denominator is the input of the rows the cached sum covers, so a row
+        // whose provider reported no breakdown neither lowers the rate nor
+        // inflates the volume.
+        measuredInputTokens: sql<number>`coalesce(sum(${telemetryEvents.inputTokens}) filter (where ${telemetryEvents.cachedInputTokens} is not null), 0)`,
         outputTokens: sql<number>`coalesce(sum(${telemetryEvents.outputTokens}), 0)`,
         errors: sql<number>`count(*) filter (where ${gatewayErrors()})`,
         cancelled: sql<number>`count(*) filter (where ${telemetryEvents.status} = 'cancelled')`,
@@ -425,6 +446,7 @@ export class DrizzleObservabilityStore implements ObservabilityStore {
     }));
     const inputTokens = Number(row?.inputTokens ?? 0);
     const cachedTokens = Number(row?.cachedTokens ?? 0);
+    const measuredInputTokens = Number(row?.measuredInputTokens ?? 0);
     const outputTokens = Number(row?.outputTokens ?? 0);
     return {
       period,
@@ -440,7 +462,7 @@ export class DrizzleObservabilityStore implements ObservabilityStore {
         avgDurationMs: Number(row?.avgDurationMs ?? 0),
         estimatedCostUsd: Number(row?.estimatedCostUsd ?? 0),
         partial: Number(row?.unpriced ?? 0) > 0,
-        cacheHitRate: inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0,
+        cacheHitRate: cacheHitRatePercent(cachedTokens, measuredInputTokens),
         avgTokensPerSec: Number(row?.avgTokensPerSec ?? 0),
       },
     };
@@ -454,7 +476,7 @@ export class DrizzleObservabilityStore implements ObservabilityStore {
         bucket: sql<Date>`to_timestamp(floor(extract(epoch from ${telemetryEvents.createdAt}) / ${bucketSeconds}) * ${bucketSeconds})`,
         requests: sql<number>`count(*)`,
         input: sql<number>`coalesce(sum(${telemetryEvents.inputTokens}), 0)`,
-        cached: sql<number>`coalesce(sum(${telemetryEvents.inputTokens}) filter (where ${telemetryEvents.cachedInputTokens} > 0), 0)`,
+        cached: sql<number>`coalesce(sum(${telemetryEvents.cachedInputTokens}), 0)`,
         output: sql<number>`coalesce(sum(${telemetryEvents.outputTokens}), 0)`,
       })
       .from(telemetryEvents)
@@ -508,7 +530,10 @@ export class DrizzleObservabilityStore implements ObservabilityStore {
         requests: sql<number>`count(*)`,
         input: sql<number>`coalesce(sum(${telemetryEvents.inputTokens}), 0)`,
         output: sql<number>`coalesce(sum(${telemetryEvents.outputTokens}), 0)`,
-        cached: sql<number>`coalesce(sum(${telemetryEvents.inputTokens}) filter (where ${telemetryEvents.cachedInputTokens} > 0), 0)`,
+        cached: sql<number>`coalesce(sum(${telemetryEvents.cachedInputTokens}), 0)`,
+        // Input of the rows the cached sum covers: a row with no reported
+        // breakdown is unmeasured and must not sit in the denominator.
+        measuredInput: sql<number>`coalesce(sum(${telemetryEvents.inputTokens}) filter (where ${telemetryEvents.cachedInputTokens} is not null), 0)`,
         errors: sql<number>`count(*) filter (where ${gatewayErrors()})`,
         cost: sql<string | null>`sum(${telemetryEvents.estimatedCostUsd})`,
         avgTokensPerSec: sql<number>`coalesce(avg(${telemetryEvents.tokensPerSec}) filter (where ${telemetryEvents.tokensPerSec} is not null), 0)`,
@@ -522,13 +547,18 @@ export class DrizzleObservabilityStore implements ObservabilityStore {
       .groupBy(column)
       .orderBy(sql`count(*) desc`)
       .limit(100);
+    // Kept beside `mapped` because the masked-IP re-aggregation below has to
+    // add the denominator too, and the rate is not additive.
+    const measuredInputByName = new Map<string, number>();
     const mapped = rows.map((row) => {
       const input = Number(row.input ?? 0);
       const output = Number(row.output ?? 0);
       const cached = Number(row.cached ?? 0);
+      const measuredInput = Number(row.measuredInput ?? 0);
       if (typeof row.name !== "string" || row.name.length === 0)
         throw new ConsoleDomainError("internal_error", 500, "Usage breakdown row missing name");
       const name = dimension === "client" ? clientNameFromUserAgent(row.name) : row.name;
+      measuredInputByName.set(name, (measuredInputByName.get(name) ?? 0) + measuredInput);
       return {
         name,
         requests: Number(row.requests ?? 0),
@@ -538,7 +568,7 @@ export class DrizzleObservabilityStore implements ObservabilityStore {
         total: input + output,
         errors: Number(row.errors ?? 0),
         costUsd: row.cost === null ? null : Number(row.cost),
-        cacheHitRate: input + output > 0 ? (input / (input + output)) * 100 : 0,
+        cacheHitRate: cacheHitRatePercent(cached, measuredInput),
         avgTokensPerSec: Number(row.avgTokensPerSec ?? 0),
       };
     });
@@ -552,28 +582,34 @@ export class DrizzleObservabilityStore implements ObservabilityStore {
       // `203.0.113.xxx`). Re-aggregate by the masked name: two rows the operator
       // cannot tell apart are one row, and the totals must not be understated.
       const merged = new Map<string, (typeof mapped)[number]>();
+      const mergedMeasuredInput = new Map<string, number>();
       for (const row of mapped) {
         const masked = maskClientIp(row.name);
+        const rowMeasured = measuredInputByName.get(row.name) ?? 0;
         const existing = merged.get(masked);
         if (existing === undefined) {
           merged.set(masked, { ...row, name: masked });
+          mergedMeasuredInput.set(masked, rowMeasured);
           continue;
         }
         const input = existing.input + row.input;
         const output = existing.output + row.output;
+        const cached = existing.cached + row.cached;
+        const measured = (mergedMeasuredInput.get(masked) ?? 0) + rowMeasured;
+        mergedMeasuredInput.set(masked, measured);
         merged.set(masked, {
           ...existing,
           requests: existing.requests + row.requests,
           input,
           output,
-          cached: existing.cached + row.cached,
+          cached,
           total: input + output,
           errors: existing.errors + row.errors,
           costUsd:
             existing.costUsd === null && row.costUsd === null
               ? null
               : (existing.costUsd ?? 0) + (row.costUsd ?? 0),
-          cacheHitRate: input + output > 0 ? (input / (input + output)) * 100 : 0,
+          cacheHitRate: cacheHitRatePercent(cached, measured),
         });
       }
       return {
@@ -605,21 +641,22 @@ export class DrizzleObservabilityStore implements ObservabilityStore {
     const [row] = await this.db
       .select({
         inputTokens: sql<number>`coalesce(sum(${telemetryEvents.inputTokens}), 0)`,
-        cachedTokens: sql<number>`coalesce(sum(${telemetryEvents.inputTokens}) filter (where ${telemetryEvents.cachedInputTokens} > 0), 0)`,
-        outputTokens: sql<number>`coalesce(sum(${telemetryEvents.outputTokens}), 0)`,
+        cachedTokens: sql<number>`coalesce(sum(${telemetryEvents.cachedInputTokens}), 0)`,
+        // The prompt of the rows the cached sum covers: an unreported row is
+        // unmeasured and must not sit in the denominator.
+        measuredInputTokens: sql<number>`coalesce(sum(${telemetryEvents.inputTokens}) filter (where ${telemetryEvents.cachedInputTokens} is not null), 0)`,
       })
       .from(telemetryEvents)
       .where(this.usageScope(tenantId, period));
     const inputTokens = Number(row?.inputTokens ?? 0);
     const cachedTokens = Number(row?.cachedTokens ?? 0);
-    const outputTokens = Number(row?.outputTokens ?? 0);
-    const tokenTotal = inputTokens + outputTokens;
+    const measuredInputTokens = Number(row?.measuredInputTokens ?? 0);
     return {
       period,
       inputTokens,
       cachedTokens,
       cacheWriteTokens: 0,
-      hitRate: tokenTotal > 0 ? (cachedTokens / tokenTotal) * 100 : 0,
+      hitRate: cacheHitRatePercent(cachedTokens, measuredInputTokens),
     };
   }
 
