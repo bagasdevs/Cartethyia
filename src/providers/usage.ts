@@ -125,6 +125,18 @@ export function repriceUsage(
 }
 
 /**
+ * Cache-token accounting shape of one upstream usage frame.
+ *
+ * `additive` (default) is Anthropic's contract: `input_tokens` counts only
+ * freshly processed tokens, so `cache_read_input_tokens` is a separate
+ * sibling and the canonical total is their sum. `inclusive` is what the
+ * CodeBuddy/Tencent buddy bridges mean despite reusing the Anthropic field
+ * names: `input_tokens` is already the all-in total and the cached count is
+ * a subset of it, so adding the subset would count the cached prefix twice.
+ */
+export type UsageCacheShape = "inclusive" | "additive";
+
+/**
  * Normalize provider-specific usage data into canonical UsageRecord.
  * Handles Anthropic (cache_read_input_tokens, cache_creation_input_tokens, output_tokens_details.thinking_tokens)
  * and OpenAI (input_tokens_details.cached_tokens, output_tokens_details.reasoning_tokens).
@@ -132,7 +144,19 @@ export function repriceUsage(
  *
  * @param input Raw provider usage response (can be Anthropic or OpenAI format)
  */
-export function normalizeUsage(input: Record<string, unknown>): UsageRecord {
+export function normalizeUsage(
+  input: Record<string, unknown>,
+  cacheShape?: UsageCacheShape,
+): UsageRecord {
+  // A few bridges (CodeBuddy/Tencent buddy family) name the fields like
+  // Anthropic (`input_tokens` + `cache_read_input_tokens`) but count
+  // OpenAI-style: `input_tokens` is already the all-in total and the cached
+  // count is a subset of it, not an additive sibling. Adding the subset on
+  // top (the Anthropic branch below) would count the cached prefix twice and
+  // halve the client's cache-hit display while ~2x-ing context/cost
+  // accounting. The adapter opts such providers into the "inclusive" shape
+  // explicitly; the default stays Anthropic-additive.
+  const inclusiveShape = cacheShape === "inclusive";
   // Raw fresh-token count. Anthropic-shape payloads report ONLY fresh tokens
   // here (cache reads/writes are separate fields); OpenAI-shape payloads
   // report the all-in total with the cached subset in details.
@@ -235,7 +259,7 @@ export function normalizeUsage(input: Record<string, unknown>): UsageRecord {
   // with the cached subset inside, so uncached is total minus cached. A lone
   // cache_creation field without a read field is treated as an OpenAI-ish
   // inclusive total: the creation count is the write volume, not extra input.
-  const hasAnthropicCacheShape = anthropic_cache_read !== null;
+  const hasAnthropicCacheShape = anthropic_cache_read !== null && !inclusiveShape;
   let uncached_input_tokens: number | "unavailable" = "unavailable";
   if (typeof cached_input_tokens === "number") {
     if (hasAnthropicCacheShape) {
@@ -341,9 +365,12 @@ function hasReportedUsage(usage: UsageRecord): boolean {
  * absence all the way to the dispatch fallback — the Messages and Codex
  * decoders already leave `usage` unset for the same reason.
  */
-export function usageFromProvider(raw: unknown): UsageRecord | undefined {
+export function usageFromProvider(
+  raw: unknown,
+  cacheShape?: UsageCacheShape,
+): UsageRecord | undefined {
   if (raw === null || typeof raw !== "object") return undefined;
-  const usage = normalizeUsage(raw as Record<string, unknown>);
+  const usage = normalizeUsage(raw as Record<string, unknown>, cacheShape);
   return hasReportedUsage(usage) ? usage : undefined;
 }
 

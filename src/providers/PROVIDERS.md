@@ -855,7 +855,19 @@ holds only its variant: endpoints, domain, platform, user agent, and envelope-co
 (`strictResponseCode` for CodeBuddy, `coercingResponseCode` for WorkBuddy's gateway, which answers a
 looser envelope).
 
-**Protobuf dirs.** `devin/generated/**` is `buf generate` output
+**Usage cache shape.** The buddy bridges reuse Anthropic usage field names with OpenAI counting: a
+frame carries an all-in `input_tokens` (whole prompt) beside `cache_read_input_tokens` as a *subset* of it.
+`normalizeUsage` cannot tell the two apart from the payload — Anthropic's real contract is that the cache
+fields are additive siblings of a fresh-only `input_tokens` — so the shape is declared per adapter.
+`OpenAICompatibleAdapterConfig.usage_cache_shape: "inclusive"` (set by `codebuddyAdapterConfig` and
+`workbuddyAdapterConfig`; the default is the Anthropic-additive shape) travels through `CodecContext` into the
+chat decoders and selects the subtract-don't-add branch. Without it the cached prefix is counted twice:
+`input_tokens` comes out as the real total plus the cached count, which halves the client's cache-hit display
+and roughly doubles its context/cost accounting. Probed live on `cb/deepseek-v4.1-flash`: one 18.9k-character
+prompt reports `input_tokens: 4594, cache_read_input_tokens: 4352`, and the additive branch answered
+`prompt_tokens: 8946` (4594 + 4352) on `/v1/chat/completions` for that same turn.
+
+**Protobuf dirs.** `cursor/generated/agent_pb.ts` and `devin/generated/**` are `buf generate` output
 (protoc-gen-es) — never hand-edit; regenerate from the vendor proto source and update `.codegen-stamp` (check
 the current prefix with `head -c 8 src/providers/integrations/.codegen-stamp`). Only the adjacent hand-written
 modules are edited for those providers.

@@ -5,12 +5,20 @@ import { canonicalToClaudeMessagesPayload } from "./request/messages";
 import { decodeChatSseStream, parseChatResponseToEvents } from "./response/chat";
 import { decodeResponsesSseStream, parseResponsesResponseToEvents } from "./response/responses";
 import { claudeResponseToEvents, parseClaudeSseStream } from "./response/messages";
+import type { UsageCacheShape } from "../providers/usage";
 
 export interface CodecContext {
   readonly isOAuth?: boolean;
   readonly sessionId?: string;
   readonly supportsPromptCaching?: boolean;
   readonly signal?: AbortSignal;
+  /**
+   * Upstream cache-token accounting for usage frames decoded under this
+   * context. Set by adapters for upstreams whose usage fields lie about the
+   * shape (CodeBuddy/Tencent buddy family) so the canonical total is not
+   * double-counted. See `UsageCacheShape`.
+   */
+  readonly usageCacheShape?: UsageCacheShape;
 }
 
 export function encodeWireRequest(
@@ -40,7 +48,7 @@ export function decodeWireResponse(
 ): readonly CanonicalEvent[] {
   switch (wireFamily) {
     case "chat":
-      return parseChatResponseToEvents(json, request);
+      return parseChatResponseToEvents(json, request, context?.usageCacheShape);
     case "responses":
       return parseResponsesResponseToEvents(json, request);
     case "messages":
@@ -58,7 +66,7 @@ export function decodeWireStream(
 ): AsyncIterable<CanonicalEvent> {
   switch (wireFamily) {
     case "chat":
-      return decodeChatSseStream(body, request, context?.signal);
+      return decodeChatSseStream(body, request, context?.signal, context?.usageCacheShape);
     case "responses":
       return decodeResponsesSseStream(body, request, context?.signal);
     case "messages":

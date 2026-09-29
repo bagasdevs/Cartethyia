@@ -7,7 +7,7 @@ import { type CanonicalEvent, type CanonicalRequest } from "../../transport/cano
 import { decodeSseEvents } from "../../transport/streaming";
 import { gatewayErrorFromStreamError } from "../stream-error-frames";
 import { mergeResponsesUsage } from "./responses";
-import { usageFromProvider, readReasoningText } from "../../providers/usage";
+import { usageFromProvider, readReasoningText, type UsageCacheShape } from "../../providers/usage";
 import { createToolEmitLedger } from "../../transport/tool-identity";
 
 export function mapChatStopReason(
@@ -23,6 +23,7 @@ export function mapChatStopReason(
 export function parseChatResponseToEvents(
   json: Record<string, unknown>,
   request: CanonicalRequest,
+  cacheShape?: UsageCacheShape,
 ): CanonicalEvent[] {
   const id = (json["id"] as string) ?? "resp_chat";
   const model = (json["model"] as string) ?? request.model;
@@ -118,6 +119,7 @@ export function parseChatResponseToEvents(
           output_tokens: rawUsage["output_tokens"] ?? rawUsage["completion_tokens"],
         }
       : undefined,
+    cacheShape,
   );
   const providerStopReason = first?.["finish_reason"];
   const chatJsonStopReason = mapChatStopReason(providerStopReason);
@@ -140,6 +142,7 @@ export async function* decodeChatSseStream(
   body: ReadableStream<Uint8Array>,
   request: CanonicalRequest,
   signal?: AbortSignal,
+  cacheShape?: UsageCacheShape,
 ): AsyncIterable<CanonicalEvent> {
   let seq = 1;
   let finishReason: unknown;
@@ -335,6 +338,6 @@ export async function* decodeChatSseStream(
         : "complete",
     stopReason: chatStopReason,
     providerStopReason: chatProviderStopReason,
-    usage: usageFromProvider(rawUsage),
+    usage: usageFromProvider(rawUsage, cacheShape),
   });
 }

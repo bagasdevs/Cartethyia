@@ -66,6 +66,9 @@ export function codebuddyAdapterConfig(args: {
     base_url: args.baseUrl,
     buildExtraHeaders: (context, request) => codebuddyHeaders(args.variant, context, request),
     prePayload: args.prePayload,
+    // CodeBuddy reuses Anthropic usage field names but reports an all-in
+    // `input_tokens` with the cached count as a subset of it.
+    usage_cache_shape: "inclusive",
     ...(args.fetchImpl ? { fetchImpl: args.fetchImpl } : {}),
   });
 }

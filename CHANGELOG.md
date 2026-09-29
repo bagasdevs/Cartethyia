@@ -1064,6 +1064,17 @@ onto one key.
 dropping it. The upstream constrains which turn comes first, not its text, so merging is safe and
 prompt caching keeps hitting the same prefix. The CN variant installs its neutralizer the same way.
 
+### Buddy usage is no longer double-counted
+
+The Tencent buddy bridges (`cb`, `cbcn`, `workbuddy`) report usage with Anthropic field names but OpenAI
+counting: `input_tokens` is the whole prompt and `cache_read_input_tokens` is a *subset* of it. `normalizeUsage`
+read that as Anthropic's additive shape and added the cached count on top, so a turn whose real prompt was
+4594 tokens (4352 of them cached) was reported as `prompt_tokens: 8946`. The cached prefix was therefore
+counted twice, which roughly halved the client's cache-hit display (49% where the real rate was 99%) and
+doubled its context accounting, driving premature compaction. The shape is now declared per adapter
+(`usage_cache_shape: "inclusive"`, threaded through `CodecContext` into the chat decoders) instead of guessed
+from field names, so the buddy family subtracts while every Anthropic wire keeps summing.
+
 ### Dispatch re-projects per candidate, and terminal upstream failures keep their detail
 
 When a candidate's `model_id` differs from the requested model, dispatch re-runs

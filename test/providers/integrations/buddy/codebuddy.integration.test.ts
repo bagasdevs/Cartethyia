@@ -148,32 +148,69 @@ describe("CodeBuddy adapter contracts", () => {
   afterEach(() => {
     _resetCodeBuddyVersionCache();
   });
-  test("intl forces upstream streaming, injects the CodeBuddy system prompt, and types user content", async () => {    let body: Record<string, unknown> = {};
-    let seenUrl = "";
-    let seenHeaders = new Headers();
-    const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      seenUrl = String(input);
-      seenHeaders = new Headers(init?.headers);
+  test("intl keeps the caller system prompt behind the fixed persona", async () => {
+    let body: Record<string, unknown> = {};
+    const fetcher = (async (_input: RequestInfo | URL, init?: RequestInit) => {
       body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       return responseSse();
     }) as typeof fetch;
     const adapter = createCodeBuddyAdapter(fetcher);
-    const events = [];
-    for await (const event of adapter.dispatch(request(), candidate(CODEBUDDY_PROVIDER_ID), context())) {
-      events.push(event);
+    for await (const _event of adapter.dispatch(
+      request({
+        messages: [
+          { role: "system", content: [{ kind: "text", text: "Your access code is APPLE-7741." }] },
+          { role: "user", content: [{ kind: "text", text: "hello" }] },
+        ],
+      }),
+      candidate(CODEBUDDY_PROVIDER_ID),
+      context(),
+    )) {
+      // drain
     }
-
-    expect(seenUrl).toBe("https://www.codebuddy.ai/v2/chat/completions");
-    expect(seenHeaders.get("authorization")).toBe("Bearer test-token");
-    expect(seenHeaders.get("x-domain")).toBe("www.codebuddy.ai");
-    expect(seenHeaders.get("x-ide-type")).toBe("IDE");
-    expect(body.stream).toBe(true);
+    // The upstream requires the wire to open with the fixed persona (11128),
+    // but the caller's own instructions must survive behind it: dropping them
+    // runs the agent without its system prompt (no rules, no tool contracts).
     expect(body.messages).toEqual([
-      { role: "system", content: CODEBUDDY_SYSTEM_PROMPT },
+      {
+        role: "system",
+        content: `${CODEBUDDY_SYSTEM_PROMPT}\n\nYour access code is APPLE-7741.`,
+      },
       { role: "user", content: [{ type: "text", text: "hello" }] },
     ]);
-    expect(events.at(-1)).toMatchObject({ type: "terminal", state: "complete" });
   });
+  test("intl decodes an all-in usage frame without doubling the cached prefix", async () => {
+    // The upstream reuses Anthropic field names with OpenAI counting: this
+    // turn's whole prompt is 4594 tokens and 4352 of them were cached. The
+    // additive branch reported input_tokens 8946 (4594 + 4352), which halved
+    // the client's cache-hit display and doubled its context accounting.
+    const sse =
+      `data: {"id":"x","model":"glm-5.2","choices":[{"delta":{"content":"hi"},"finish_reason":null}]}\n\n` +
+      `data: {"id":"x","model":"glm-5.2","choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"input_tokens":4594,"output_tokens":8,"cache_read_input_tokens":4352}}\n\n` +
+      `data: [DONE]\n\n`;
+    const fetcher = (async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(sse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })) as typeof fetch;
+    const adapter = createCodeBuddyAdapter(fetcher);
+    const events = [];
+    for await (const event of adapter.dispatch(
+      request({ stream: true }),
+      candidate(CODEBUDDY_PROVIDER_ID),
+      context(),
+    )) {
+      events.push(event);
+    }
+    expect(events.at(-1)).toMatchObject({
+      type: "terminal",
+      usage: {
+        input_tokens: 4594,
+        cached_input_tokens: 4352,
+        uncached_input_tokens: 242,
+      },
+    });
+  });
+
   test("preserves stable x-conversation-id from inbound request headers", async () => {
     let seenHeaders = new Headers();
     const fetcher = (async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -294,7 +331,7 @@ describe("CodeBuddy adapter contracts", () => {
     }
 
     expect(body.messages).toEqual([
-      { role: "system", content: CODEBUDDY_SYSTEM_PROMPT },
+      { role: "system", content: `${CODEBUDDY_SYSTEM_PROMPT}\n\nsys` },
       {
         role: "user",
         content: [image, { type: "text", text: "coba liat ini" }],

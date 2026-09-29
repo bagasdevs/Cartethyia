@@ -159,8 +159,11 @@ describe("WorkBuddy integration", () => {
     };
     workbuddyPrePayload(payload, request(), candidate());
     expect(payload.stream).toBe(true);
+    // The upstream only requires the wire to open with a system turn; the
+    // caller's own instructions ride behind the fixed persona so the agent
+    // still receives the prompt it was configured with.
     expect(payload.messages).toEqual([
-      { role: "system", content: WORKBUDDY_SYSTEM_PROMPT },
+      { role: "system", content: `${WORKBUDDY_SYSTEM_PROMPT}\n\nclient system` },
       { role: "user", content: [{ type: "text", text: "hello" }] },
     ]);
   });

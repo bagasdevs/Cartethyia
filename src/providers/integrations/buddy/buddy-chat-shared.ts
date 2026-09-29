@@ -294,17 +294,17 @@ export function finalizeBuddyMessages(
 }
 
 /**
- * Applies the buddy-family message envelope in place: drop caller
- * `system`/`developer` turns, install the variant's fixed leading system
- * prompt, rebuild bare string user content as a typed text block, then
- * coalesce consecutive user turns.
+ * Applies the buddy-family message envelope in place: keep the caller's
+ * `system`/`developer` instruction text behind the variant's fixed leading
+ * system prompt (joined with a blank line), rebuild bare string user content
+ * as a typed text block, then coalesce consecutive user turns.
  *
- * The upstream gateway expects that fixed leading prompt and rejects bare
- * string user content, so every variant that has one applies the same
- * transformation — only the prompt text differs, which is why the caller
- * passes it in. Variants without a fixed prompt (CodeBuddy CN replaces caller
- * system text with a neutralizer instead) keep their own path and share only
- * `coalesceConsecutiveUserMessages`.
+ * The upstream gateway validates that the wire *opens* with a `system` turn
+ * (`11128`/`11151`) but does not constrain its text, so merging is safe and
+ * prompt caching keeps hitting the same prefix. Dropping the caller's text
+ * threw away the system prompt the client actually configured (OMP agent
+ * instructions, AGENTS.md rules, tool contracts) while leaving only the
+ * fixed persona — an agent that silently runs without its instructions.
  *
  * Tool call/output pairing is intentionally NOT handled here: the shared
  * canonical repair (`repairRequestToolCalls`, request/preparer) owns it for
@@ -314,11 +314,22 @@ export function applyBuddySystemPrompt(
   messages: Array<Record<string, unknown>>,
   systemPrompt: string,
 ): void {
-  const source = messages.filter(
-    (message) => message["role"] !== "system" && message["role"] !== "developer",
-  );
+  const callerInstructions: Array<string> = [];
+  const source: Array<Record<string, unknown>> = [];
+  for (const message of messages) {
+    if (message["role"] === "system" || message["role"] === "developer") {
+      const text = buddyInstructionText(message);
+      if (text.length > 0) callerInstructions.push(text);
+      continue;
+    }
+    source.push(message);
+  }
+  const merged =
+    callerInstructions.length > 0
+      ? `${systemPrompt}\n\n${callerInstructions.join("\n\n")}`
+      : systemPrompt;
   messages.length = 0;
-  messages.push({ role: "system", content: systemPrompt });
+  messages.push({ role: "system", content: merged });
   for (const message of source) {
     if (message["role"] === "user" && typeof message["content"] === "string") {
       messages.push({
@@ -331,3 +342,27 @@ export function applyBuddySystemPrompt(
   }
   finalizeBuddyMessages(messages, systemPrompt);
 }
+
+/**
+ * Text of one inbound wire message, for caller-instruction preservation.
+ * Bare string content is used verbatim; typed content parts keep only their
+ * text blocks in order (image/audio/result parts have no text rendering).
+ */
+function buddyInstructionText(message: Record<string, unknown>): string {
+  const content = message["content"];
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const texts: Array<string> = [];
+  for (const part of content) {
+    if (part === null || typeof part !== "object") continue;
+    const block = part as Record<string, unknown>;
+    if (block["type"] !== "text") continue;
+    const text = block["text"];
+    if (typeof text === "string") {
+      const trimmed = text.trim();
+      if (trimmed.length > 0) texts.push(trimmed);
+    }
+  }
+  return texts.join("\n");
+}
+

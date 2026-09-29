@@ -116,6 +116,9 @@ export function workbuddyAdapterConfig(args: {
     endpoint_paths_by_wire_family: { chat: WORKBUDDY_CHAT_PATH },
     buildExtraHeaders: (context, request) => workbuddyHeaders(context, request),
     prePayload: args.prePayload,
+    // WorkBuddy shares the Tencent buddy usage envelope: Anthropic field
+    // names, all-in `input_tokens`, cached count as a subset of it.
+    usage_cache_shape: "inclusive",
     ...(args.fetchImpl ? { fetchImpl: args.fetchImpl } : {}),
   });
 }

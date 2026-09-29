@@ -54,6 +54,43 @@ describe("normalizeUsage", () => {
     expect(usage.cached_input_tokens).toBe(1408);
     expect(usage.uncached_input_tokens).toBe(184);
   });
+  test("Anthropic stays additive by default (fresh input + cache read)", () => {
+    const usage = normalizeUsage({
+      input_tokens: 242,
+      output_tokens: 8,
+      cache_read_input_tokens: 4352,
+    });
+    expect(usage.uncached_input_tokens).toBe(242);
+    expect(usage.input_tokens).toBe(4594);
+    expect(usage.cached_input_tokens).toBe(4352);
+  });
+
+  test("buddy bridges name Anthropic fields but count inclusively", () => {
+    // Measured live on the CodeBuddy wire: one turn reports
+    // `input_tokens: 4594, cache_read_input_tokens: 4352` on /v1/messages and
+    // `prompt_tokens: 8946, cached_tokens: 4352` on /v1/chat/completions for
+    // the same prompt. 4594 is the whole prompt (18.9k chars cannot be 8946
+    // tokens), 4352 of it cached, and 4594 + 4352 = 8946 is exactly the
+    // doubled total the additive branch produced.
+    const usage = normalizeUsage(
+      { input_tokens: 4594, output_tokens: 8, cache_read_input_tokens: 4352 },
+      "inclusive",
+    );
+    expect(usage.input_tokens).toBe(4594);
+    expect(usage.cached_input_tokens).toBe(4352);
+    expect(usage.uncached_input_tokens).toBe(242);
+  });
+
+  test("inclusive shape clamps a cached count that exceeds the reported total", () => {
+    const usage = normalizeUsage(
+      { input_tokens: 100, output_tokens: 5, cache_read_input_tokens: 400 },
+      "inclusive",
+    );
+    expect(usage.input_tokens).toBe(100);
+    expect(usage.cached_input_tokens).toBe(100);
+    expect(usage.uncached_input_tokens).toBe(0);
+  });
+
   test("reads the Tencent buddy-meter credit field", () => {
     // Probed live on cb/deepseek-v4.1-flash-sg: top-level `credit` beside
     // the token counts — a billing-meter unit, not USD.

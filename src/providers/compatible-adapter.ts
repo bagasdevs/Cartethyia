@@ -20,6 +20,7 @@ import { createUpstreamDeadlineLifecycle } from "./operations/upstream-deadline"
 import { encodeWireRequest, decodeWireResponse, decodeWireStream } from "../protocol/registry";
 import { postUpstreamJson } from "../protocol/transport/openai";
 import { GATEWAY_USER_AGENT } from "./operations/gateway-user-agent";
+import type { UsageCacheShape } from "./usage";
 import {
   BUILTIN_DEFAULT_ENDPOINTS,
   filterProviderCustomHeaders,
@@ -121,6 +122,14 @@ export interface OpenAICompatibleAdapterConfig {
   readonly structured_output?: { readonly mode: "json_object" | "json_schema"; readonly enabled: boolean; readonly schema?: Record<string, unknown> };
   /** Whether this provider accepts OpenAI prompt cache controls on its wire. */
   readonly supports_prompt_caching?: boolean;
+  /**
+   * Upstream cache-token accounting for usage frames. `inclusive` marks
+   * bridges (CodeBuddy/Tencent buddy family) that reuse the Anthropic field
+   * names but report an all-in `input_tokens` total with the cached count as
+   * a subset — summing that subset would double-count the cached prefix.
+   * See `UsageCacheShape`. Defaults to the Anthropic-additive shape.
+   */
+  readonly usage_cache_shape?: UsageCacheShape;
   /** Final payload mutation hook — runs after canonical translation, before serialization. Lets a provider promote extension-namespaced `generation_controls` fields (e.g. Cerebras `extra_body`) without a fetch-wrapping hack. */
   /**
    * Per-dispatch dynamic header hook, applied after `extra_headers` (so it
@@ -387,7 +396,12 @@ export class OpenAICompatibleAdapter extends BaseProviderAdapter {
           "upstream",
         );
       }
-      yield* decodeWireStream(wireFamily, res.body, request, { signal: context.abort_signal });
+      yield* decodeWireStream(wireFamily, res.body, request, {
+        signal: context.abort_signal,
+        ...(this.config.usage_cache_shape === undefined
+          ? {}
+          : { usageCacheShape: this.config.usage_cache_shape }),
+      });
     } else {
       // A streaming request answered with a non-SSE body is a provider
       // protocol violation, and the body is often an error envelope or a
@@ -458,7 +472,12 @@ export class OpenAICompatibleAdapter extends BaseProviderAdapter {
           classification.origin,
         );
       }
-      for (const ev of decodeWireResponse(wireFamily, json, request)) yield ev;
+      for (const ev of decodeWireResponse(wireFamily, json, request, {
+        ...(this.config.usage_cache_shape === undefined
+          ? {}
+          : { usageCacheShape: this.config.usage_cache_shape }),
+      }))
+        yield ev;
     }
   }
 }
