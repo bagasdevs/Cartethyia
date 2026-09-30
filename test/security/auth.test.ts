@@ -224,11 +224,11 @@ describe("ApiKeyAuthorizationSnapshot", () => {
       await mockDispatch({ authorization: snapshot, targetProvider: provider, targetModel: model });
     };
 
-    await expect(attemptDispatch("openai", "gpt-4")).resolves.toBeUndefined();
+    expect(attemptDispatch("openai", "gpt-4")).resolves.toBeUndefined();
     expect(dispatchCalls).toBe(1);
 
-    await expect(attemptDispatch("openai", "gpt-4o")).rejects.toThrow();
-    await expect(attemptDispatch("anthropic", "gpt-4")).resolves.toBeUndefined();
+    expect(attemptDispatch("openai", "gpt-4o")).rejects.toThrow();
+    expect(attemptDispatch("anthropic", "gpt-4")).resolves.toBeUndefined();
     // denied requests never reached dispatch
     expect(dispatchCalls).toBe(2);
   });

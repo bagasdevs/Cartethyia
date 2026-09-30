@@ -78,7 +78,7 @@ describe("native compact routing preparation", () => {
       admissionService: {} as never,
     });
 
-    await expect(preparer.prepareNativeCompact({ model: "gpt-5.6-sol", authorization })).rejects.toMatchObject({
+    expect(preparer.prepareNativeCompact({ model: "gpt-5.6-sol", authorization })).rejects.toMatchObject({
       code: "capability_unsupported",
       status: 400,
     });
@@ -93,7 +93,7 @@ describe("canonical request preparation", () => {
       routingEngine: { plan: async () => { throw new Error("must not plan"); } } as never,
       admissionService: {} as never,
     });
-    await expect(
+    expect(
       preparer.prepare({
         canonicalRequest: {
           model: "gpt-5.6-sol",
