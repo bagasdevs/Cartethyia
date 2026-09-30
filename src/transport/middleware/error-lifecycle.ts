@@ -1,6 +1,6 @@
 // Error normalization + telemetry/cleanup lifecycle for the transport pipeline.
 import { Elysia } from "elysia";
-import { GatewayError, explainGatewayError, labelGatewayMessage, publicGatewayErrorDetails } from "../gateway-error";
+import { GatewayError, explainGatewayError, formatPublicErrorMessage, publicGatewayErrorDetails } from "../gateway-error";
 import type { ProxyRequestState, ProxyRequestStateStore } from "../request/state";
 import { GATEWAY_SECURITY_HEADERS } from "../../security/outbound-headers";
 import type { TelemetryBatchBuffer, TelemetryEventInput } from "../../observability/telemetry-buffer";
@@ -81,9 +81,9 @@ export function createErrorNormalizationMiddleware(deps: {
         gateway !== undefined
           ? explainGatewayError(gateway)
           : isInputError && error instanceof Error
-            ? labelGatewayMessage("cartethyia", error.message)
-            : labelGatewayMessage(
-                "cartethyia",
+            ? formatPublicErrorMessage(code, error.message)
+            : formatPublicErrorMessage(
+                code,
                 isBuiltinError ? builtin?.message ?? "Unable to process request" : "Internal server error",
               );
       const origin = gateway?.origin ?? "cartethyia";

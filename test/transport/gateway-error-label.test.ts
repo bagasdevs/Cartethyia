@@ -1,50 +1,51 @@
 /**
- * The public error envelope must name which side failed.
+ * The public error message is `code: explanatory` for every origin.
  *
- * A provider rejection and a gateway rejection used to be indistinguishable on
- * the wire: upstream errors were emitted with no prefix at all, so an
- * operator reading a bare message could not tell a rejected credential from a
- * gateway defect, and every unlabelled failure read as ours. These tests pin
- * the label contract — each origin gets its own prefix, and the prefix is
- * applied exactly once.
+ * Origin branding (`Cartethyia Error:`, `Upstream Error:`, …) used to be
+ * stamped into the message so a client that only printed `message` could tell
+ * who failed. Clients already receive a structured `origin` field, and the
+ * product prefix made every gateway defect look like a branded product fault.
+ * Blame stays in `origin`; the message names the stable code plus the
+ * explanatory text — upstream and gateway look the same on the wire.
  */
 import { describe, expect, test } from "bun:test";
-import { GatewayError, explainGatewayError, labelGatewayMessage } from "../../src/transport/gateway-error";
+import {
+  GatewayError,
+  explainGatewayError,
+  formatPublicErrorMessage,
+} from "../../src/transport/gateway-error";
 
-describe("origin labelling", () => {
-  test("an upstream failure is labelled as the upstream's, never the gateway's", () => {
+describe("public error message format", () => {
+  test("an upstream failure is code + explanatory, never product-branded", () => {
     const error = new GatewayError("authentication_failed", 401, "invalid api key", {}, "upstream");
     const message = explainGatewayError(error);
-    expect(message).toBe("Upstream Error: invalid api key");
+    expect(message).toBe("authentication_failed: invalid api key");
     expect(message).not.toInclude("Cartethyia");
+    expect(message).not.toInclude("Upstream Error");
   });
 
-  test("a gateway failure is labelled as the gateway's", () => {
+  test("a gateway failure is code + explanatory", () => {
     const error = new GatewayError("invalid_request", 400, "model is required");
-    expect(explainGatewayError(error)).toBe("Cartethyia Error: model is required");
+    expect(explainGatewayError(error)).toBe("invalid_request: model is required");
   });
 
-  test("a network failure gets its own label rather than reading as the gateway's", () => {
+  test("a network failure uses the same code + explanatory shape", () => {
     const error = new GatewayError("proxy_unreachable", 502, "tunnel refused", {}, "network");
-    expect(explainGatewayError(error)).toBe("Network Error: tunnel refused");
+    expect(explainGatewayError(error)).toBe("proxy_unreachable: tunnel refused");
   });
 
-  test("the prefix is applied exactly once, however many boundaries it crosses", () => {
-    // The ingress normalizer labels the message, then the same value can be
-    // re-labelled by a second shaper (the console error handler). Doubling
-    // produced "Cartethyia Error: Cartethyia Error: ..." and made the message
-    // unreadable, so a labelled message is returned unchanged.
-    const once = labelGatewayMessage("cartethyia", "model is required");
-    expect(once).toBe("Cartethyia Error: model is required");
-    expect(labelGatewayMessage("cartethyia", once)).toBe(once);
-    expect(labelGatewayMessage("upstream", once)).toBe(once);
-    expect(labelGatewayMessage("network", once)).toBe(once);
+  test("the code prefix is applied exactly once", () => {
+    const once = formatPublicErrorMessage("invalid_request", "model is required");
+    expect(once).toBe("invalid_request: model is required");
+    expect(formatPublicErrorMessage("invalid_request", once)).toBe(once);
   });
 
-  test("an already-labelled upstream message is not re-labelled by another origin", () => {
-    const message = labelGatewayMessage("upstream", "quota exhausted");
-    expect(message).toBe("Upstream Error: quota exhausted");
-    // A later boundary must not overwrite the upstream label with its own.
-    expect(labelGatewayMessage("cartethyia", message)).toBe(message);
+  test("legacy origin brand prefixes are stripped before formatting", () => {
+    expect(
+      formatPublicErrorMessage("quota_exceeded", "Upstream Error: quota exhausted"),
+    ).toBe("quota_exceeded: quota exhausted");
+    expect(
+      formatPublicErrorMessage("internal_error", "Cartethyia Error: Internal server error"),
+    ).toBe("internal_error: Internal server error");
   });
 });

@@ -55,7 +55,7 @@ const DEFAULT_MAX_EVENT_BYTES = 4 * 1024 * 1024;
 // labelling it `invalid_request` told the client its request was wrong and
 // invited a retry of the identical request against a broken upstream. The
 // `upstream` origin keeps the public envelope from prefixing it
-// "Cartethyia Error:", which blamed the gateway for the provider's bytes.
+// a gateway-branded message, which blamed the gateway for the provider's bytes.
 function oversized(what: string): GatewayError {
   return new GatewayError("platform_unavailable", 502, `SSE ${what} exceeds size bound`, {}, "upstream");
 }

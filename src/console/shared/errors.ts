@@ -1,8 +1,7 @@
 import { ValidationError } from "elysia";
 import type { AccessDecision, AccessScope } from "../../security/access-control";
 import { isRecord } from "../../protocol/primitives";
-import { labelGatewayMessage } from "../../transport/gateway-error";
-import type { GatewayErrorOrigin } from "../../transport/gateway-error";
+import { formatPublicErrorMessage } from "../../transport/gateway-error";
 
 // Single console error/access contract. Every domain throws ConsoleDomainError
 // (or the storage-layer BackupError, same code/status/message shape) and
@@ -10,7 +9,6 @@ import type { GatewayErrorOrigin } from "../../transport/gateway-error";
 
 export interface ErrorResponseOptions {
   readonly detailsPolicy?: "omit" | "include-if-present" | "always-include";
-  readonly origin?: "internal" | "upstream";
 }
 
 export class ConsoleDomainError extends Error {
@@ -51,11 +49,10 @@ export function errorResponse(
   code: string;
   details?: Record<string, unknown>;
 } {
-  const origin: GatewayErrorOrigin = options.origin === "upstream" ? "upstream" : "cartethyia";
   const shaped = asDomainError(error);
   if (shaped) {
     set.status = shaped.status;
-    const message = labelGatewayMessage(origin, shaped.message);
+    const message = formatPublicErrorMessage(shaped.code, shaped.message);
     const details = isRecord(shaped.details) ? shaped.details : undefined;
     const includeDetails =
       options.detailsPolicy === "always-include"
@@ -72,7 +69,7 @@ export function errorResponse(
   }
   set.status = 500;
   const body: Record<string, unknown> = {
-    error: labelGatewayMessage(origin, fallbackMessage),
+    error: formatPublicErrorMessage("internal_error", fallbackMessage),
     code: "internal_error",
   };
   return body as { error: string; code: string; details?: Record<string, unknown> };

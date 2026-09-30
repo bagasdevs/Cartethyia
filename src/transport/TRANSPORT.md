@@ -516,19 +516,14 @@ client error on one route and a server error on another.
 
 ### Message labels
 
-`origin` is machine-readable; the public `message` carries the same distinction in text so a client that only
-prints the message can still tell who failed. Every origin has its own prefix — `Cartethyia Error:`,
-`Upstream Error:`, `Network Error:` — applied by `labelGatewayMessage`, which prefixes **exactly once** so a value
-that crosses two shapers (the ingress normalizer, then the console error handler) is not doubled.
+`origin` is machine-readable and stays in the structured envelope (`error.origin`). The public `message` is
+always `code: explanatory` via `formatPublicErrorMessage` / `explainGatewayError` — the same shape for gateway,
+upstream, and network failures. Product brand prefixes (`Cartethyia Error:`, …) are never stamped into the
+text; legacy prefixes are stripped if a value crosses two shapers.
 
-Labelling the upstream is deliberate. The earlier behaviour emitted upstream messages bare to avoid blaming the
-gateway, but an unlabelled message is ambiguous rather than neutral: a provider rejection and a gateway defect
-were indistinguishable, so every one of them read as ours. Naming the real source is what removes the ambiguity;
-naming nothing does not.
-
-The prefix follows `origin`, never the code alone. A code that can arrive from more than one boundary —
-`transport_unavailable`, `deadline_exceeded`, `platform_unavailable` — must set `origin` to the boundary that
-actually failed at each construction site, because the label and the routing/health decisions both read it.
+A code that can arrive from more than one boundary — `transport_unavailable`, `deadline_exceeded`,
+`platform_unavailable` — must still set `origin` to the boundary that actually failed at each construction
+site, because routing/health decisions and operator UIs read `origin`, not the message prefix.
 
 Structured provider types may normalize the public code/status; the original HTTP status remains in diagnostic details.
 

@@ -294,9 +294,11 @@ dbDescribe("checks.test.ts", () => {
       };
       expect(body.error?.code).toBe("client_router_denied");
       expect(body.error?.origin).toBe("cartethyia");
-      // The public message carries the standard `Cartethyia Error:` origin
-      // prefix; the text itself is generic and never names the matched router.
+      // Public message is `code: explanatory`; never product-branded, never
+      // names the matched router.
       expect(body.error?.message ?? "").toContain("No API invocation access for this client.");
+      expect(body.error?.message ?? "").toStartWith("client_router_denied:");
+      expect(body.error?.message ?? "").not.toInclude("Cartethyia");
     });
 
     test("refuses a bare Node User-Agent when the key denies the router", async () => {
@@ -497,7 +499,7 @@ describe("security header middleware", () => {
     expect(await response.json()).toMatchObject({
       error: {
         code: "internal_error",
-        message: "Cartethyia Error: Internal server error",
+        message: "internal_error: Internal server error",
       },
     });
     expect(response.headers.get("content-security-policy")).toContain("default-src 'none'");
@@ -522,7 +524,7 @@ describe("security header middleware", () => {
     expect(await response.json()).toMatchObject({
       error: {
         code: "invalid_request",
-        message: "Cartethyia Error: Chat request malformed content",
+        message: "invalid_request: Chat request malformed content",
       },
     });
   });

@@ -136,9 +136,9 @@ export class ProxyRequestStateStore {
   /**
    * Creates per-request state with deadline enforcement: the deadline is
    * *enforced by an unref'd timer* that aborts the controller with a
-   * `TimeoutError` at `deadlineMs` — unref'd so an idle deadline never keeps
-   * the event loop alive during graceful shutdown. The inbound client signal
-   * is bridged (abort propagation in both directions), so a client
+   * `deadline_exceeded` at `deadlineMs` — unref'd so an idle deadline never
+   * keeps the event loop alive during graceful shutdown. The inbound client
+   * signal is bridged (abort propagation in both directions), so a client
    * disconnect aborts the upstream fetch immediately. Everything the timer
    * and signal listener allocated is torn down by `state.cleanup()`.
    */
@@ -155,7 +155,18 @@ export class ProxyRequestStateStore {
     const armDeadline = (ms: number): void => {
       clearTimeout(timer);
       timer = setTimeout(() => {
-        abortController.abort(new DOMException("request deadline exceeded", "TimeoutError"));
+        // Same vocabulary as the stream stall watchdog: a TimeoutError
+        // DOMException was mis-handled mid-stream as a silent client cancel
+        // (no SSE error, telemetry fell through to generic 500).
+        abortController.abort(
+          new GatewayError(
+            "deadline_exceeded",
+            504,
+            "request deadline exceeded",
+            {},
+            "cartethyia",
+          ),
+        );
       }, Math.max(0, ms));
       // Do not keep event loop alive for idle deadline timers (graceful shutdown)
       (timer as unknown as { unref?: () => void })?.unref?.();

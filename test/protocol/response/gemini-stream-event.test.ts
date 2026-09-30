@@ -50,7 +50,7 @@ describe("decodeGeminiStreamEvent", () => {
     expect((caught as GatewayError).code).toBe("platform_unavailable");
     expect((caught as GatewayError).status).toBe(502);
     // The corrupt bytes are the upstream's, so the envelope must not blame the
-    // gateway: `origin: "upstream"` is what keeps "Cartethyia Error:" off it.
+    // gateway: `origin: "upstream"` keeps blame on the provider, not the gateway.
     expect((caught as GatewayError).origin).toBe("upstream");
     expect((caught as GatewayError).message).toStartWith("Malformed SSE event: ");
   });

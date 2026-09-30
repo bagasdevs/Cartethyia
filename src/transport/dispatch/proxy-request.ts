@@ -1,6 +1,6 @@
 import { isBundledProviderId } from "../../providers/provider-registry";
 import type { ProviderDispatchContext, ProviderId, ProviderAdapter } from "../../providers/provider-registry";
-import { GatewayError, explainGatewayError, labelGatewayMessage, publicGatewayErrorDetails } from "../gateway-error";
+import { GatewayError, explainGatewayError, formatPublicErrorMessage, publicGatewayErrorDetails } from "../gateway-error";
 import { classifyTerminalCategory } from "../failure-policy";
 import type { CanonicalEvent, UsageRecord } from "../canonical-model";
 import { resolveCredentialForAccount } from "../../providers/operations/provider-credential-service";
@@ -522,12 +522,24 @@ export async function handleProviderProxyRequest(
           async pull(controller) {
             if (state.abortController.signal.aborted) {
               const reason = state.abortController.signal.reason;
-              if (reason instanceof GatewayError && reason.code === "deadline_exceeded") {
-                // The stall watchdog fires with no client action at all, so
-                // this branch is reached by an ordinary provider timeout — it
-                // needs the same release guarantee as the catch below.
+              const deadlineFailure =
+                reason instanceof GatewayError && reason.code === "deadline_exceeded"
+                  ? reason
+                  : reason instanceof DOMException && reason.name === "TimeoutError"
+                    ? new GatewayError(
+                        "deadline_exceeded",
+                        504,
+                        "request deadline exceeded",
+                        {},
+                        "cartethyia",
+                      )
+                    : undefined;
+              if (deadlineFailure) {
+                // Hard deadline / stall watchdog: emit an SSE error so the
+                // client sees the failure instead of a silent socket close
+                // that Usage records as a generic streaming 500.
                 try {
-                  await emitStreamErrorAndClose(reason, controller);
+                  await emitStreamErrorAndClose(deadlineFailure, controller);
                 } finally {
                   void releaseStreamResources();
                 }
@@ -685,7 +697,15 @@ export async function handleProviderProxyRequest(
           const watchdogFailure =
             abortReason instanceof GatewayError && abortReason.code === "deadline_exceeded"
               ? abortReason
-              : undefined;
+              : abortReason instanceof DOMException && abortReason.name === "TimeoutError"
+                ? new GatewayError(
+                    "deadline_exceeded",
+                    504,
+                    "request deadline exceeded",
+                    {},
+                    "cartethyia",
+                  )
+                : undefined;
           const streamError = watchdogFailure ?? err;
           const cancelled =
             watchdogFailure === undefined &&
@@ -742,7 +762,7 @@ export async function handleProviderProxyRequest(
             const origin = gatewayError?.origin ?? "network";
             const message = gatewayError
               ? explainGatewayError(gatewayError)
-              : labelGatewayMessage(origin, "Upstream stream failed");
+              : formatPublicErrorMessage(code, "Upstream stream failed");
             const details = gatewayError ? publicGatewayErrorDetails(gatewayError) : {};
             for (const bytes of streamEncoder.encodeError({ origin, code, message, details })) {
               controller.enqueue(bytes);

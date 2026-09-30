@@ -51,7 +51,14 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
       // pre-stream deadline must not kill a healthy long response body; the
       // outer request watchdog now owns inter-event stall detection.
       lifecycle.release();
-      yield* this.transformStream(response, request, target, transportContext);
+      // Body reads must watch the *request* abort signal. transportContext
+      // still carries the released lifecycle signal, which is no longer
+      // bridged to state.abortController — stall/deadline aborts would
+      // otherwise never cancel the upstream reader.
+      yield* this.transformStream(response, request, target, {
+        ...transportContext,
+        abort_signal: context.abort_signal,
+      });
     } catch (error: unknown) {
       if (lifecycle.signal.aborted || (error instanceof Error && error.name === "AbortError")) {
         throw new GatewayError("transport_closed", 499, "request was cancelled");

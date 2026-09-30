@@ -71,42 +71,45 @@ export class GatewayError extends Error {
 }
 
 /**
- * The public prefix each origin carries, so a client reading the message alone
- * can tell which side failed.
+ * Legacy origin brand prefixes. Older builds stamped these into the public
+ * `message`; strip them so a value that crossed two shapers is not doubled
+ * and so clients never see product branding in the error text.
  *
- * Every origin is labelled, including `upstream`. Leaving the upstream message
- * bare (the previous behaviour) was meant to keep the gateway from being
- * blamed, but it produced the opposite problem: an unlabelled message is
- * ambiguous, so a provider rejection and a gateway rejection looked identical
- * and every one of them read as ours. A distinct label per origin keeps the
- * blame accurate *and* legible — the fix is to name the real source, not to
- * name nothing.
+ * Blame lives in the structured `origin` field (`cartethyia` | `upstream` |
+ * `network`). The public message is always `code: explanatory` for every
+ * origin — gateway and upstream look the same on the wire.
  */
-const ORIGIN_LABELS: Readonly<Record<GatewayErrorOrigin, string>> = {
-  cartethyia: "Cartethyia Error:",
-  upstream: "Upstream Error:",
-  network: "Network Error:",
-};
+const LEGACY_ORIGIN_LABELS: readonly string[] = [
+  "Cartethyia Error:",
+  "Upstream Error:",
+  "Network Error:",
+];
 
-const ORIGIN_LABEL_PREFIXES: readonly string[] = Object.values(ORIGIN_LABELS);
+function stripLegacyOriginLabel(message: string): string {
+  const trimmed = message.trim();
+  for (const prefix of LEGACY_ORIGIN_LABELS) {
+    if (trimmed.startsWith(prefix)) return trimmed.slice(prefix.length).trimStart();
+  }
+  return trimmed;
+}
 
 /**
- * Prefixes a message with its origin label, exactly once.
+ * Public client-facing error text: `code: explanatory`.
  *
- * A message that already carries any origin label is returned unchanged, so a
- * value that passed through more than one boundary is not double-prefixed.
- * Exported because the ingress normalizer and the console error shaper both
- * need the same mapping; deriving it independently in each is how the two
- * envelopes drift.
+ * Applied once: a message that already starts with `code:` is returned
+ * unchanged. Origin is never written into the text — clients that need the
+ * layer read `error.origin`.
  */
-export function labelGatewayMessage(origin: GatewayErrorOrigin, message: string): string {
-  if (ORIGIN_LABEL_PREFIXES.some((prefix) => message.startsWith(prefix))) return message;
-  return `${ORIGIN_LABELS[origin]} ${message}`;
+export function formatPublicErrorMessage(code: string, message: string): string {
+  const explanatory = stripLegacyOriginLabel(message);
+  if (explanatory.length === 0) return code;
+  if (explanatory === code || explanatory.startsWith(`${code}:`)) return explanatory;
+  return `${code}: ${explanatory}`;
 }
 
 /** Formats a gateway error for public/internal clients without mutating it. */
 export function explainGatewayError(error: GatewayError): string {
-  return labelGatewayMessage(error.origin, error.message);
+  return formatPublicErrorMessage(error.code, error.message);
 }
 
 const PUBLIC_ERROR_DETAIL_KEYS = new Set([
