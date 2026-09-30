@@ -731,7 +731,7 @@ export async function handleProviderProxyRequest(
             ...(clientResponseText.length > 0 ? { clientResponseText } : {}),
           });
           streamSettled = true;
-          if (streamNetworkPoolId && !cancelled && deps.poolSelector && shouldCooldownPool(err)) {
+          if (streamNetworkPoolId && !cancelled && deps.poolSelector && shouldCooldownPool(err, streamProviderId)) {
             flagPoolCooldown(deps.poolSelector, deps.db, streamNetworkPoolId, streamProviderId, err);
           }
           if (!cancelled) metrics.proxy_requests_total.inc(1, { status: "failed" });

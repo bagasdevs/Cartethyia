@@ -9,7 +9,7 @@ import {
   createResponsesCompactHandler,
   type ResponsesCompactHandlerDeps,
 } from "../../../src/transport/dispatch/responses-compact";
-import { isOAuthCredentialInvalidated } from "../../../src/transport/dispatch/retry-policy";
+import { isOAuthCredentialInvalidated, shouldCooldownPool } from "../../../src/transport/dispatch/retry-policy";
 import { ProxyRequestPreparer, type PreparedProxyRequest } from "../../../src/transport/request/preparer";
 import type { RouteCandidate } from "../../../src/transport/routing/route-model";
 import { ProxyRequestStateStore } from "../../../src/transport/request/state";
@@ -868,6 +868,59 @@ test("does not force OAuth refresh for a hosted web_search tool failure on 403",
     "upstream",
   );
   expect(isOAuthCredentialInvalidated(error)).toBe(false);
+});
+
+describe("shouldCooldownPool", () => {
+  const providerScoped429 = (providerId: string): GatewayError =>
+    new GatewayError(
+      "quota_exceeded",
+      429,
+      "Error 429: Daily free limit reached on model meta/muse-spark-1.3-contributor. Try again in 11h 8m",
+      { providerId, providerStatus: 429, providerCode: "rate_limit_exceeded", rateLimitScope: "provider" },
+      "upstream",
+    );
+
+  test("an account-keyed provider's 429 leaves the pool alone", () => {
+    // The reported case: cline's own account hit its daily limit, and cooling
+    // the shared pool took every healthy cline account out of service with it.
+    // The account health machine already carries this failure; the pool did not
+    // run out of anything.
+    expect(shouldCooldownPool(providerScoped429("cline"), "cline")).toBe(false);
+  });
+
+  test("an IP-keyed provider's 429 cools the pool", () => {
+    // A credential-less free tier counts requests from the egress address, so
+    // the pool IS the exhausted resource and the next attempt must leave by a
+    // different one.
+    expect(shouldCooldownPool(providerScoped429("opencodeft"), "opencodeft")).toBe(true);
+  });
+
+  test("an unknown provider is treated as account-keyed", () => {
+    // A BYOK upstream states nothing about IP scoping, so the conservative
+    // reading keeps healthy siblings routable.
+    expect(shouldCooldownPool(providerScoped429("custom-byok"), "custom-byok")).toBe(false);
+  });
+
+  test("the caller's own candidate decides, not a providerId detail on the error", () => {
+    // The in-stream error frames carry no `providerId` detail, so reading the
+    // provider off the error would disable the IP-scoped rule on exactly the
+    // streaming path it exists for.
+    const error = providerScoped429("opencodeft");
+    const withoutDetail = new GatewayError(
+      error.code,
+      error.status,
+      error.message,
+      { rateLimitScope: "provider" },
+      "upstream",
+    );
+    expect(shouldCooldownPool(withoutDetail, "opencodeft")).toBe(true);
+    expect(shouldCooldownPool(withoutDetail, "cline")).toBe(false);
+  });
+
+  test("a request-level 429 never cools the pool, whatever the provider", () => {
+    const bare = new GatewayError("quota_exceeded", 429, "Too many requests", {}, "upstream");
+    expect(shouldCooldownPool(bare, "opencodeft")).toBe(false);
+  });
 });
 
 describe("ProxyRequestPreparer degradation visibility", () => {

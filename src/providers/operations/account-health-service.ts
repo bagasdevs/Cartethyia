@@ -453,6 +453,22 @@ async function persistAccountFailure(
 
     if (shouldModelCooldown) {
       const existing = (account.modelCooldowns as Record<string, string> | null) ?? {};
+      const nextUntil =
+        classification.retryAt?.toISOString() ??
+        new Date(Date.now() + classification.cooldownMs).toISOString();
+      const previousUntil = existing[modelId];
+      // A re-statement is not an event: what the audit row reports is the
+      // *entry* into a cooling episode, and the deadline itself is not a
+      // column — so a row can only ever say "this pair started cooling for
+      // this reason". The upstream answers the same "Try again in 11h" on
+      // every retry (and an unstated reset is recomputed from now each time),
+      // so writing per failure produced seven identical rows in twenty minutes
+      // and read as an account flapping when nothing had changed. The entry is
+      // still refreshed below — its error fields are what the dialog explains
+      // the cooldown with — while an entry that is still in force suppresses
+      // the duplicate row.
+      const alreadyCooling =
+        previousUntil !== undefined && new Date(previousUntil).getTime() > Date.now();
       // `status`/`cooldownUntil` stay untouched: only this (account, model)
       // pair backs off, and the account remains routable for every other model.
       // The error fields ARE written, because they are what provider detail and
@@ -461,28 +477,44 @@ async function persistAccountFailure(
       await client
         .update(providerAccounts)
         .set({
-          modelCooldowns: {
-            ...existing,
-            [modelId]: classification.retryAt?.toISOString() ?? new Date(Date.now() + classification.cooldownMs).toISOString(),
-          },
+          modelCooldowns: { ...existing, [modelId]: nextUntil },
           lastError: classification.reason,
           lastErrorCategory: classification.category,
           lastErrorAt: now,
         })
         .where(eq(providerAccounts.id, accountId));
-    } else {
-      await client
-        .update(providerAccounts)
-        .set({
-          status: classification.status,
-          consecutiveFailures: sql`${providerAccounts.consecutiveFailures} + 1`,
-          lastError: classification.reason,
-          lastErrorCategory: classification.category,
-          lastErrorAt: now,
-          cooldownUntil: classification.retryAt,
-        })
-        .where(eq(providerAccounts.id, accountId));
+      if (!alreadyCooling && typeof client.insert === "function") {
+        await client.insert(healthEvents).values({
+          entityKind: "account",
+          accountId,
+          // The account's own status, on both sides: a model-scoped throttle
+          // never moved it, and writing `classification.status` here claimed an
+          // `active → cooldown` transition that never happened — the dialog
+          // showed "Account status: ACTIVE" above a list of transitions to
+          // `cooldown`. The row still names the model and the reason, which is
+          // what makes it worth keeping.
+          fromStatus: fromStatus as "active" | "cooldown" | "disabled",
+          toStatus: fromStatus as "active" | "cooldown" | "disabled",
+          reason: classification.reason,
+          errorCategory: classification.category,
+          modelId: modelId ?? null,
+          createdAt: now,
+        });
+      }
+      return classification;
     }
+
+    await client
+      .update(providerAccounts)
+      .set({
+        status: classification.status,
+        consecutiveFailures: sql`${providerAccounts.consecutiveFailures} + 1`,
+        lastError: classification.reason,
+        lastErrorCategory: classification.category,
+        lastErrorAt: now,
+        cooldownUntil: classification.retryAt,
+      })
+      .where(eq(providerAccounts.id, accountId));
 
     if (typeof client.insert === "function") {
       await client.insert(healthEvents).values({

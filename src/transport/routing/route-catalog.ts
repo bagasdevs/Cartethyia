@@ -69,7 +69,7 @@ export function cliMappingSourceKeys(toolId: string, sourceModel: string): reado
  */
 
 type RouteCandidateWithHealth = RouteCandidate & {
-  health_status?: "cooldown" | "disabled";
+  health_status?: "cooldown" | "model_cooldown" | "disabled";
 };
 
 /**
@@ -554,12 +554,24 @@ class RouteCatalogRepository {
         }
 
         // Per-model cooldown: an account may be healthy globally but cooling down
-        // for a specific model. A non-expired entry marks the candidate as
-        // cooling down without affecting the account's overall status.
+        // for a specific model. A non-expired entry for the model THIS candidate
+        // serves is a hard exclusion, not a deprioritization: the upstream said
+        // this exact (account, model) pair is exhausted until a stated reset
+        // ("Daily free limit reached … Try again in 11h"), so dialing it can only
+        // reproduce the same refusal. Deprioritizing instead made failover spend
+        // a full round trip on it after every healthy sibling had failed, and
+        // recorded another `active → cooldown` row each time — the operator's
+        // report of one account churning while ten siblings sat healthy.
+        //
+        // `model_cooldown` (distinct from `cooldown`) is what carries that
+        // distinction to the evaluator: an account-wide `cooldown` stays
+        // deprioritized so a single-account deployment still routes, while a
+        // model-scoped one is dropped for this model only and the account keeps
+        // serving every other model it holds.
         const modelCooldowns = account.modelCooldowns as Record<string, string> | null;
         const modelCooldownUntil = modelCooldowns?.[model.modelId];
         if (modelCooldownUntil && new Date(modelCooldownUntil).getTime() > Date.now()) {
-          candidate.health_status = "cooldown";
+          candidate.health_status = "model_cooldown";
         }
         if (tenantId === undefined || candidate.tenant_id === null || candidate.tenant_id === tenantId) {
           candidates.push(candidate);

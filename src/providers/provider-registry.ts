@@ -7,7 +7,7 @@ import type { OAuthLoginClient } from "./authentication/oauth-flow-store";
 import type { OAuthTokenRefresher } from "./authentication/oauth-refresh-service";
 import type { QuotaFetcher } from "./quota/quota-support";
 import { unwrapProviderToken, type TokenEnvelope } from "./credential-envelope";
-import { BUNDLED_PROVIDER_METADATA, DEFAULT_PROXY_BYPASS_PROVIDER_IDS, providerBaseUrl, providerJwtVerification, providerRequiresAccount, providerUpstreamHost, providerDefaultWireFamily } from "./provider-metadata";
+import { BUNDLED_PROVIDER_METADATA, DEFAULT_PROXY_BYPASS_PROVIDER_IDS, providerBaseUrl, providerJwtVerification, providerRateLimitIsIpScoped, providerRequiresAccount, providerUpstreamHost, providerDefaultWireFamily } from "./provider-metadata";
 import { metrics } from "../observability/metrics";
 import { trackAdapterLoad } from "../observability/performance-metrics";
 import type { ModelDefinition } from "./model-definition";
@@ -57,7 +57,7 @@ export function toRegistration(module: ProviderModule): ProviderRegistration {
   };
 }
 
-export { DEFAULT_PROXY_BYPASS_PROVIDER_IDS, providerBaseUrl, providerJwtVerification, providerRequiresAccount, providerUpstreamHost, providerDefaultWireFamily };
+export { DEFAULT_PROXY_BYPASS_PROVIDER_IDS, providerBaseUrl, providerJwtVerification, providerRateLimitIsIpScoped, providerRequiresAccount, providerUpstreamHost, providerDefaultWireFamily };
 export type { BundledProviderId, ProviderJwtVerification } from "./provider-metadata";
 
 /**

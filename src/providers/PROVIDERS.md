@@ -34,7 +34,8 @@ Three layers combine in `default-registry.ts: BUNDLED_PROVIDER_MODULES`, then `c
 1. **Metadata** (`provider-metadata.ts: RAW_BUNDLED_PROVIDER_METADATA`): `id`, `displayName`, `baseUrl` are
    the only required fields. Optionals: `wireFamilyDefault` (default `chat`; `messages` for
    `anthropic`/`claude`, `responses` for `codex`), `requiresAccount` (only `opencodeft: false`),
-   `defaultBypassProxy` (only `inferhub`), `jwtVerification` (only `grok`/`xai`), and the
+   `defaultBypassProxy` (only `inferhub`), `ipScopedRateLimit` (only `opencodeft`),
+   `jwtVerification` (only `grok`/`xai`), and the
    presentation-only pair `credentialUrl` + `credentialHint`: where an operator obtains the
    provider's credential, and one line of guidance when the flow is not a plain paste. The
    credential pair reaches the dashboard through `providerCredentialUrl()` /
@@ -46,6 +47,9 @@ Three layers combine in `default-registry.ts: BUNDLED_PROVIDER_MODULES`, then `c
    `providerBaseUrl()` is the single declaration of origin; `providerUpstreamHost()` carries the SSRF
    binding, so dispatch needs no second map. `DEFAULT_PROXY_BYPASS_PROVIDER_IDS` derives the one
    proxy-bypass default that console routing, provider detail, and domain registration all read.
+   `ipScopedRateLimit` is the one statement of which providers rate-limit by egress address rather
+   than by credential, read through `providerRateLimitIsIpScoped()` by `shouldCooldownPool` — the
+   account-keyed majority leaves the proxy pool alone on a 429 and lets account failover carry it.
    `PROVIDER_COMPATIBILITY_PROFILES` holds OpenAI-wire overrides only for the three `opencode*` hosts.
    `opencodeft` is the one provider that serves a free tier of a shared catalog: its discovery filters
    `/zen/v1/models` down to the free ids (`isFreeTierZenModel`, which keeps the `-free` convention plus the
@@ -561,7 +565,13 @@ deadlines. Routing, console, and discovery consume providers through these servi
   `reportAttemptOutcome` is the per-attempt hook, `recoverAccount` / `sweepExpiredCooldowns` run recovery, and
   every transition is journaled to `healthEvents`. A throttle (`rate_limit_transient` / `model_capacity`) with
   a `modelId` cools the **(account, model)** pair through `modelCooldowns` instead of the account, so the
-  account stays routable for every other model; the console reports those live backoffs beside the status,
+  account stays routable for every other model. That write is model-scoped in its audit row too: the row
+  records the account's own status on **both** sides (`fromStatus`/`toStatus` both `active`) and names the
+  model, because a per-model throttle never moved the account and a row claiming `active → cooldown` sat
+  directly under a dialog reading "Account status: ACTIVE". A re-stated throttle inside an entry that is still
+  in force refreshes the entry and its error fields but writes no second row: the upstream repeats the same
+  reset on every retry, so per-failure rows read as an account flapping while nothing changed.
+  The console reports those live backoffs beside the status,
   including **when** the soonest one clears — a cooldown is detection-based, so the deadline is the part an
   operator acts on, and a per-model throttle leaves `cooldownUntil` null, so a view reading only that field
   showed a 429 reason with no time at all. Both health dialogs build that line from one shared component, and

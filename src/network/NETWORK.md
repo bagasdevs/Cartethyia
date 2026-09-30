@@ -133,8 +133,14 @@ candidate (`leases.ts` builds it only when the pool-owning tenant's setting is
 `getSelectionFailure` reports `at_capacity` / `cooldown` /
 `coordination_unavailable` / `no_active_pool` with per-pool snapshots.
 
-**Cooldowns and health.** A provider-scoped upstream 429 flags only the `(pool, provider)` pair in
-`NetworkPoolSelector` locally and in Redis; `pool-health.ts` mirrors the cooldown episode into
+**Cooldowns and health.** A provider-scoped upstream 429 flags the `(pool, provider)` pair in
+`NetworkPoolSelector` locally and in Redis **only for a provider whose limits follow the egress
+address** — `shouldCooldownPool` in `../transport/dispatch/retry-policy.ts` gates on
+`providerRateLimitIsIpScoped` (`../providers/provider-metadata.ts`), which is true for the
+credential-less free tier that counts requests per address. For an account-keyed provider the 429
+belongs to the credential that was dialed: the account health machine records it and failover moves
+to a sibling, so flagging the pool too would remove every healthy account sharing that egress from
+service for the cooldown window. `pool-health.ts` mirrors the cooldown episode into
 `health_events` without sidelining the pool. The console pool overview reads those flags in one
 `MGET` per pool, and a pool with no cooling providers — the normal state — lists no members, so the
 empty case returns an empty list without issuing a command Redis would reject (`MGET` requires at

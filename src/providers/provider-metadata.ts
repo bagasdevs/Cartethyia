@@ -106,7 +106,7 @@ const RAW_BUNDLED_PROVIDER_METADATA = [
     credentialHint: "Sign in with AWS Builder ID, an Identity Center organization, Google/GitHub, or paste a Kiro API key.",
   },
   { id: "kimi", displayName: "Kimi Code", baseUrl: "https://api.kimi.com/coding", credentialUrl: "https://platform.moonshot.ai/console/api-keys" },
-  { id: "opencodeft", displayName: "OpenCode Free", baseUrl: "https://opencode.ai", requiresAccount: false, hasAdapterUserAgent: true },
+  { id: "opencodeft", displayName: "OpenCode Free", baseUrl: "https://opencode.ai", requiresAccount: false, ipScopedRateLimit: true, hasAdapterUserAgent: true },
   { id: "opencodezen", displayName: "OpenCode Zen", baseUrl: "https://opencode.ai", hasAdapterUserAgent: true, credentialUrl: "https://opencode.ai/auth" },
   { id: "opencodego", displayName: "OpenCode Go", baseUrl: "https://opencode.ai", credentialUrl: "https://opencode.ai/auth" },
   { id: "cerebras", displayName: "Cerebras", baseUrl: "https://api.cerebras.ai/v1", credentialUrl: "https://cloud.cerebras.ai/platform" },
@@ -221,6 +221,25 @@ export interface BundledProviderMetadata {
   readonly wireFamilyDefault: WireFamily;
   readonly requiresAccount: boolean;
   readonly defaultBypassProxy: boolean;
+  /**
+   * Whether this provider's rate limits are keyed on the *egress address*
+   * rather than on a credential.
+   *
+   * An account-keyed provider (the ordinary case) answers 429 for the
+   * credential that ran out, so the remedy is to back that account off and
+   * route the next request to a sibling — the pool the request dialed through
+   * is not at fault, and cooling it down sidelines every healthy account on
+   * it. An IP-keyed provider (a credential-less free tier) answers 429 for the
+   * address the request came from, so the pool IS the thing that must back
+   * off: retrying from the same address reproduces the refusal no matter which
+   * account is selected.
+   *
+   * This flag is the single statement of that difference. It is what
+   * `shouldCooldownPool` reads to decide whether a provider-scoped 429 cools
+   * the pool; every other provider leaves the pool alone and lets the account
+   * health machine carry the failure.
+   */
+  readonly ipScopedRateLimit: boolean;
   readonly jwtVerification: ProviderJwtVerification;
   /**
    * The provider's adapter frames its own wire protocol instead of going
@@ -239,6 +258,7 @@ export const BUNDLED_PROVIDER_METADATA: readonly BundledProviderMetadata[] = RAW
   const wireFamilyDefault: WireFamily = "wireFamilyDefault" in definition ? definition.wireFamilyDefault : "chat";
   const requiresAccount = "requiresAccount" in definition ? definition.requiresAccount : true;
   const defaultBypassProxy = Boolean("defaultBypassProxy" in definition && definition.defaultBypassProxy);
+  const ipScopedRateLimit = Boolean("ipScopedRateLimit" in definition && definition.ipScopedRateLimit);
   const jwtVerification: ProviderJwtVerification =
     "jwtVerification" in definition ? definition.jwtVerification : {};
   const bespokeWire = Boolean("bespokeWire" in definition && definition.bespokeWire);
@@ -248,6 +268,7 @@ export const BUNDLED_PROVIDER_METADATA: readonly BundledProviderMetadata[] = RAW
     wireFamilyDefault,
     requiresAccount,
     defaultBypassProxy,
+    ipScopedRateLimit,
     jwtVerification,
     bespokeWire,
     hasAdapterUserAgent,
@@ -361,6 +382,26 @@ export function providerUpstreamHost(providerId: string): { readonly hostname: s
 export const DEFAULT_PROXY_BYPASS_PROVIDER_IDS: ReadonlySet<string> = new Set(
   BUNDLED_PROVIDER_METADATA.filter((entry) => entry.defaultBypassProxy === true).map((entry) => entry.id),
 );
+
+/** Providers whose rate limits follow the egress address, not a credential. */
+const IP_SCOPED_RATE_LIMIT_PROVIDER_IDS: ReadonlySet<string> = new Set(
+  BUNDLED_PROVIDER_METADATA.filter((entry) => entry.ipScopedRateLimit === true).map((entry) => entry.id),
+);
+
+/**
+ * Whether a provider-scoped 429 should cool the proxy pool down.
+ *
+ * Only an IP-keyed provider warrants it: the pool is the resource that ran out
+ * of allowance, so backing it off is the fix. For every other provider the 429
+ * belongs to the account that was dialed — the account health machine already
+ * records it, and cooling the pool as well would sideline every healthy sibling
+ * sharing that egress. Unknown ids (a BYOK provider) are account-keyed: a
+ * configurable upstream states nothing about IP scoping, so the pool is left
+ * alone.
+ */
+export function providerRateLimitIsIpScoped(providerId: string | undefined): boolean {
+  return providerId !== undefined && IP_SCOPED_RATE_LIMIT_PROVIDER_IDS.has(providerId);
+}
 
 // ---------------------------------------------------------------------------
 // Third-party response validation

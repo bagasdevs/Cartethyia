@@ -185,7 +185,7 @@ export async function runAttemptLoop<TResult, TAdapter>(
         ...(deps.telemetryBuffer ? { telemetryBuffer: deps.telemetryBuffer } : {}),
         ...(deps.snapshotService ? { snapshotService: deps.snapshotService } : {}),
       });
-      if (networkPoolId && !cancelled && deps.poolSelector && shouldCooldownPool(error)) {
+      if (networkPoolId && !cancelled && deps.poolSelector && shouldCooldownPool(error, candidate.provider_id)) {
         flagPoolCooldown(deps.poolSelector, deps.db, networkPoolId, candidate.provider_id, error);
       }
       // A 403 can be a deterministic provider policy rejection, not an

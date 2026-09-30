@@ -502,6 +502,11 @@ dbDescribe("createDatabaseSnapshotBuilder — zero-account provider eligibility"
     // This is the boundary the reported symptom crossed: the account read
     // `active` but `/v1` still refused to route it, while a direct probe (which
     // addresses the account by id and never consults the catalog) succeeded.
+    //
+    // The marker is `model_cooldown`, not `cooldown`: an account-wide cooldown
+    // stays a deprioritization so a single-account deployment still routes,
+    // while an unexpired per-model entry is a verdict about this exact
+    // (account, model) pair and is excluded outright.
     const accountId = randomUUID();
     await db.insert(providerAccounts).values({
       id: accountId,
@@ -518,7 +523,7 @@ dbDescribe("createDatabaseSnapshotBuilder — zero-account provider eligibility"
       const coolingCandidate = cooling.candidates.find(
         (c) => c.provider_id === gatedProviderId && c.model_id === gatedModelId,
       );
-      expect((coolingCandidate as { health_status?: string })?.health_status).toBe("cooldown");
+      expect((coolingCandidate as { health_status?: string })?.health_status).toBe("model_cooldown");
 
       // Recovery clears the map, so the same (account, model) pair routes again.
       await db

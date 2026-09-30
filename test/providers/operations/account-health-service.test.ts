@@ -163,6 +163,49 @@ dbDescribe("Account Health Recorder & Auto-Recovery", () => {
     expect(events[0]?.modelId).toBe("gpt-5");
   });
 
+  test("a model-scoped throttle records no false account transition", async () => {
+    // The reported symptom: the health dialog showed "Account status: ACTIVE"
+    // above fifty rows reading `active → cooldown`. The status never moved —
+    // only the (account, model) pair backed off — so the row claiming a
+    // transition to `cooldown` was simply wrong.
+    const db = getDb();
+    const { accountId } = await createTestAccount("active");
+
+    await recordAccountFailure(
+      db,
+      accountId,
+      new Error("Rate limit reached: requests per minute exceeded"),
+      { origin: "upstream", scope: "account", statusCode: 429, modelId: "gpt-5" },
+    );
+
+    const events = await listAccountHealthEvents(db, accountId);
+    expect(events[0]?.modelId).toBe("gpt-5");
+    expect(events[0]?.fromStatus).toBe("active");
+    expect(events[0]?.toStatus).toBe("active");
+  });
+
+  test("a re-stated model cooldown writes no second audit row", async () => {
+    // The upstream answers the same "Try again in 11h" on every retry, so
+    // recording each one produced seven identical rows in twenty minutes and
+    // read as an account flapping. The deadline is what an event reports, so
+    // an unchanged one is not an event.
+    const db = getDb();
+    const { accountId } = await createTestAccount("active");
+    const failure = { origin: "upstream" as const, scope: "account" as const, statusCode: 429, modelId: "gpt-5" };
+
+    await recordAccountFailure(db, accountId, new Error("Rate limit reached"), failure);
+    await recordAccountFailure(db, accountId, new Error("Rate limit reached"), failure);
+    await recordAccountFailure(db, accountId, new Error("Rate limit reached"), failure);
+
+    const events = await listAccountHealthEvents(db, accountId);
+    expect(events.filter((event) => event.modelId === "gpt-5")).toHaveLength(1);
+    // The cooldown itself is still in force and still explained.
+    const rows = await db.select().from(providerAccounts).where(eq(providerAccounts.id, accountId));
+    const cooldowns = rows[0]?.modelCooldowns as Record<string, string>;
+    expect(new Date(cooldowns["gpt-5"]!).getTime()).toBeGreaterThan(Date.now());
+    expect(rows[0]?.lastErrorCategory).toBe("rate_limit_transient");
+  });
+
   test("sweepExpiredCooldowns prunes expired model cooldown keys", async () => {
     const db = getDb();
     const { accountId } = await createTestAccount("active");

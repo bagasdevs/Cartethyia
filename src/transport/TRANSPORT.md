@@ -334,7 +334,12 @@ all lookup keys.
 
 Account fan-out is per account, not per provider-tenant: global providers still pair with each tenant's own accounts. Expired
 cooldowns read as healthy (the health sweeper materializes recovery); per-model `modelCooldowns` mark individual candidates
-cooling down. A cooling account is deprioritized rather than excluded — it is ordered behind every healthy sibling and reached only when nothing better is left — while a `disabled` account is a hard exclusion until an operator restores it.
+`model_cooldown` for the model they name. The two markers differ in force, because they differ in what they know. An
+account-wide `cooldown` is deprioritized rather than excluded — it is ordered behind every healthy sibling and reached only
+when nothing better is left, so a single-account deployment still routes. A `model_cooldown` is a hard exclusion: the upstream
+stated this exact (account, model) pair is exhausted until a named reset, so retrying inside it can only reproduce the refusal
+while the account keeps serving its other models; with every candidate model-cooling the plan throws `accounts_unavailable`.
+A `disabled` account is a hard exclusion until an operator restores it.
 
 **Planning** (`RoutingEngine.plan()`) order: alias resolve → combo expand → tenant filter → ambiguity check → eligibility →
 capability filter → provider routing reorder. Returns a `RoutePlan` with ordered `candidates`.
@@ -425,8 +430,12 @@ A terminal `failed` state — written only by the upstream decoders — carries 
 `terminalFailure()` forwards it rather than flattening it to a bare 502: `provider_stop_reason` becomes
 `details.provider_code`, `stop_details` is spread into `details`, and a `message` inside those details becomes
 the public message. Losing that detail turned a provider's specific rejection into "upstream request failed".
-Provider 429s with provider scope flag a pool cooldown (`flagPoolCooldown`, in `../network/pool-health.ts`, writing the
-volatile flag and the durable `health_events` row through one call). A 403 is refreshed only when
+Provider 429s with provider scope flag a pool cooldown only when the provider's limits follow the egress address
+(`shouldCooldownPool` reads `providerRateLimitIsIpScoped`, in `../providers/provider-metadata.ts`) — a credential-less free
+tier counts requests per address, so the pool is the exhausted resource. For an account-keyed provider the same 429 leaves the
+pool alone: the account health machine records it and failover moves to a sibling, and cooling the pool as well would sideline
+every healthy account sharing that egress. The flag and its durable `health_events` row are written through one call
+(`flagPoolCooldown`, in `../network/pool-health.ts`). A 403 is refreshed only when
 `isOAuthCredentialInvalidated()` finds credential evidence; policy rejections (e.g. CodeBuddy `11140`) are retryable but
 never refresh, so the loop advances to the next candidate. The only same-candidate retry is the post-refresh re-entry, which
 by definition runs only when the credential was actually refreshed.

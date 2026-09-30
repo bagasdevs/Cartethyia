@@ -142,6 +142,7 @@ export interface RouteSnapshot {
 export type EligibilityReason =
   | "healthy"
   | "cooldown"
+  | "model_cooldown"
   | "quota_exhausted"
   | "locked"
   | "disabled"

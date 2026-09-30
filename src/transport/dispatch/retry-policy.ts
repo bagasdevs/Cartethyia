@@ -10,6 +10,7 @@
  * cooldown eligibility (here).
  */
 import { GatewayError } from "../gateway-error";
+import { providerRateLimitIsIpScoped } from "../../providers/provider-registry";
 
 /**
  * Returns true only when an upstream failure is evidence that the OAuth
@@ -33,16 +34,40 @@ export function isOAuthCredentialInvalidated(error: unknown): error is GatewayEr
 }
 
 /**
- * A provider-scoped 429: the pool this request dialed through is being rate
- * limited *by the upstream provider*, so the pool should cool down for that
- * provider. A bare 429 without provider scope is a request-level limit and
- * must not sideline the whole pool.
+ * A provider-scoped 429, on a provider whose limits follow the egress address.
+ *
+ * Only then is the pool the thing that ran out: the upstream counted requests
+ * from this address, so the next attempt must leave by a different one and
+ * cooling this pool is the fix. `providerRateLimitIsIpScoped` holds that fact
+ * per provider (see the metadata field) rather than inferring it from the
+ * response — a 429 states which bucket was exhausted only in the provider's own
+ * wording, and every account-keyed provider words it the same way.
+ *
+ * For an account-keyed provider the 429 belongs to the credential that was
+ * dialed. The account health machine already records it and routes the next
+ * request to a sibling, so cooling the pool as well only removed healthy
+ * accounts from service: every account sharing that egress lost its route for
+ * the cooldown window because one of them hit its own limit. A bare 429 with no
+ * provider scope stays a request-level limit and never cools the pool.
+ *
+ * `providerId` is the caller's own candidate, not a field read off the error:
+ * the in-stream error frames the protocol modules build carry no `providerId`
+ * detail, so reading it from `details` would silently disable the IP-scoped
+ * rule on exactly the streaming path it exists for.
+ *
+ * A type guard on `GatewayError`, so a caller that passes this check can hand
+ * the same value to `flagPoolCooldown` without a second narrowing step.
  */
-export function shouldCooldownPool(error: unknown): error is GatewayError {
-  return (
-    error instanceof GatewayError &&
-    error.origin === "upstream" &&
-    error.status === 429 &&
-    error.details.rateLimitScope === "provider"
-  );
+export function shouldCooldownPool(error: unknown, providerId: string): error is GatewayError {
+  if (
+    !(
+      error instanceof GatewayError &&
+      error.origin === "upstream" &&
+      error.status === 429 &&
+      error.details.rateLimitScope === "provider"
+    )
+  ) {
+    return false;
+  }
+  return providerRateLimitIsIpScoped(providerId);
 }

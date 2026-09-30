@@ -4,7 +4,7 @@ import type { RouteCandidate, RouteSnapshot } from "../../../src/transport/routi
 
 const acct = (
   id: string,
-  health?: "cooldown" | "disabled",
+  health?: "cooldown" | "model_cooldown" | "disabled",
 ): RouteCandidate => ({
   provider_id: "cb",
   model_id: "deepseek-v4.1-flash",
@@ -70,6 +70,40 @@ describe("exhausted models report unavailable, not missing", () => {
       [],
     );
     expect(plan.candidates.map((c) => c.provider_account_id)).toEqual(["B", "C", "A"]);
+  });
+
+  test("a model-scoped cooldown is excluded, not deprioritized", async () => {
+    // The reported symptom: the upstream stated this exact (account, model)
+    // pair is exhausted until a named reset, yet the plan kept the account in
+    // the list. Failover then spent a round trip on a known-refused account
+    // after every healthy sibling had failed, and each attempt logged another
+    // `active → cooldown` row — the operator read that as one account churning
+    // while its siblings sat idle.
+    const engine = new RoutingEngine();
+    const plan = await engine.plan(
+      "cb/deepseek-v4.1-flash",
+      snap([acct("A", "model_cooldown"), acct("B"), acct("C")]),
+      null,
+      [],
+    );
+    expect(plan.candidates.map((c) => c.provider_account_id)).toEqual(["B", "C"]);
+  });
+
+  test("every account model-cooling throws accounts_unavailable, not a route to a refused account", async () => {
+    // Unlike an account-wide cooldown — which still routes, so a single-account
+    // deployment is never parked — a model-scoped one has no usable candidate
+    // left for this model. Answering 503 is the honest outcome; dialing a pair
+    // the upstream just refused is not.
+    const engine = new RoutingEngine();
+    const err = await engine
+      .plan("cb/deepseek-v4.1-flash", snap([acct("A", "model_cooldown")]), null, [])
+      .then(
+        () => null,
+        (error: unknown) => error as { code?: string; status?: number; details?: { reasons?: string[] } },
+      );
+    expect(err?.code).toBe("accounts_unavailable");
+    expect(err?.status).toBe(503);
+    expect(err?.details?.reasons).toContain("model_cooldown");
   });
 
   test("disabled accounts stay excluded until explicitly recovered", async () => {

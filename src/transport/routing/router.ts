@@ -304,6 +304,16 @@ function resolveAlias(
  * so they are reached only when nothing better is left, and a single-account
  * deployment still routes through its own cooling account rather than failing.
  *
+ * `model_cooldown` is the exception, and a hard exclusion. It is the snapshot's
+ * marker for an *unexpired per-model* entry on the candidate whose model is
+ * being planned — the upstream stated this exact (account, model) pair is
+ * exhausted until a named reset. That is a verdict about this request, not a
+ * general "try later": the deadline is the provider's own statement, retrying
+ * inside it can only reproduce the refusal, and the account keeps serving every
+ * other model it holds. Deprioritizing it instead made failover burn a full
+ * round trip on a known-refused account after every healthy sibling failed, and
+ * logged a fresh `active → cooldown` row on each attempt.
+ *
  * `disabled` stays a hard exclusion: it is an operator decision, and only an
  * operator restores it.
  */
@@ -318,6 +328,8 @@ export class EligibilityEvaluator {
       return { eligible: false, reason: "locked", candidate };
     if (state.health_status === "disabled")
       return { eligible: false, reason: "disabled", candidate };
+    if (state.health_status === "model_cooldown")
+      return { eligible: false, reason: "model_cooldown", candidate };
     if (state.health_status === "cooldown")
       return { eligible: true, reason: "cooldown", candidate };
     return { eligible: true, reason: "healthy", candidate };
