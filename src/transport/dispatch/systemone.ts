@@ -1,4 +1,4 @@
-import type { ProviderAdapter } from "../../providers/provider-registry";
+import type { ProviderAdapter, ProviderDispatchTarget } from "../../providers/provider-registry";
 import { GatewayError } from "../gateway-error";
 import { resolveCredentialForAccount } from "../../providers/operations/provider-credential-service";
 import type { OAuthTokenRefresher, OAuthRefreshService } from "../../providers/authentication/oauth-refresh-service";
@@ -12,16 +12,22 @@ import { ProxyRequestStateStore } from "../request/state";
 import { ProxyRequestPreparer } from "../request/preparer";
 import { isModelAllowed } from "../../security/api-key-auth";
 import { parseThinkingSuffix } from "../translation/thinking";
-import type { CodexCompactAdapter } from "../../providers/integrations/codex/codex";
 import { completeAttempt, estimatedUsage } from "./attempt-finalize";
 import { repriceUsage, usageFromProvider } from "../../providers/usage";
 import { runAttemptLoop } from "./attempt-loop";
 
 /**
- * The native Codex compaction route (`POST /v1/responses/compact`) and the
- * dependency surface it needs to drive `runAttemptLoop`.
+ * The native System One route (`POST /v1/systemone`) and the dependency surface
+ * it needs to drive `runAttemptLoop`.
+ *
+ * System One is a decision protocol, not chat: the caller sends
+ * `{model, state, questions}` and receives `{answers, usage}`. The body stays
+ * opaque — neither parsed nor projected — but routing, admission, retry,
+ * accounting, and telemetry run through the same attempt loop as every other
+ * route. The provider's adapter method (`ProviderAdapter.systemone`) forwards
+ * the body untouched.
  */
-export interface ResponsesCompactHandlerDeps {
+export interface SystemoneHandlerDeps {
   readonly db: CartethyiaDatabase;
   readonly providerAdapters: ReadonlyMap<string, ProviderAdapter>;
   /** Preferred over `providerAdapters`: resolves an adapter on demand and caches it. */
@@ -36,56 +42,50 @@ export interface ResponsesCompactHandlerDeps {
   readonly oauthRefreshService?: OAuthRefreshService;
 }
 
-/**
- * Handles `POST /v1/responses/compact`: the native Codex compaction proxy. The
- * wire body stays opaque — it is neither parsed nor projected — but routing,
- * admission, retry, accounting, and telemetry run through the same attempt
- * loop as the canonical proxy routes.
- */
-export function createResponsesCompactHandler(deps: ResponsesCompactHandlerDeps) {
+/** Adapter that can serve a System One decision request. */
+type SystemoneAdapter = ProviderAdapter & {
+  systemone: NonNullable<ProviderAdapter["systemone"]>;
+};
+
+export function createSystemoneHandler(deps: SystemoneHandlerDeps) {
   return async ({ request }: { request: Request }): Promise<Response> => {
     const state = deps.stateStore.require(request);
     const authorization = state.authorization;
     const body = state.ingressBody;
     if (!authorization || body === null || typeof body !== "object" || Array.isArray(body))
-      throw new GatewayError("invalid_request", 400, "compact request body must be a JSON object");
-    const compact = body as Record<string, unknown>;
-    if (typeof compact.model !== "string" || compact.model.trim().length === 0)
+      throw new GatewayError("invalid_request", 400, "systemone request body must be a JSON object");
+    const decision = body as Record<string, unknown>;
+    if (typeof decision.model !== "string" || decision.model.trim().length === 0)
       throw new GatewayError("invalid_request", 400, "model is required");
-    // A thinking suffix (`model(high)`) is stripped here for the same reason the
-    // canonical preparer strips it: this route matches the model name against
-    // the allowlist and the route plan, and `(high)` is not part of any
-    // registered id. The level itself is dropped rather than applied —
-    // compaction is a context operation, not a generation, so there is no
-    // reasoning effort to shape, and the body is passed upstream verbatim.
-    // Stripping keeps a client that appends the suffix to every request working
-    // here instead of failing with a misleading model-not-found.
-    const { model: compactModel } = parseThinkingSuffix(compact.model);
-    const compactBody: Record<string, unknown> =
-      compactModel === compact.model ? compact : { ...compact, model: compactModel };
-    if (!isModelAllowed(authorization.snapshot, compactModel))
+    // A thinking suffix (`model(high)`) is stripped for the same reason the
+    // canonical preparer strips it: the route matches the model name against the
+    // allowlist and the route plan, and `(high)` is not part of any registered
+    // id. The level itself is dropped — a decision request carries no reasoning
+    // effort to shape, and the body is passed upstream verbatim.
+    const { model: bareModel } = parseThinkingSuffix(decision.model);
+    const decisionBody: Record<string, unknown> =
+      bareModel === decision.model ? decision : { ...decision, model: bareModel };
+    if (!isModelAllowed(authorization.snapshot, bareModel))
       throw new GatewayError("model_not_found", 404, "model is not allowed for this API key");
-    if (!(typeof compact.input === "string" || Array.isArray(compact.input)))
-      throw new GatewayError("invalid_request", 400, "input must be a string or array");
-    if ("instructions" in compact && typeof compact.instructions !== "string")
-      throw new GatewayError("invalid_request", 400, "instructions must be a string");
-    if (compact.stream === true)
-      throw new GatewayError(
-        "capability_unsupported",
-        400,
-        "Responses compact does not support streaming",
-      );
-    const adapter = (deps.resolveProviderAdapter
-      ? await deps.resolveProviderAdapter("codex")
-      : deps.providerAdapters.get("codex")) as CodexCompactAdapter | undefined;
-    if (!adapter || typeof adapter.compact !== "function")
-      throw new GatewayError("admission_unavailable", 503, "Codex compact transport unavailable");
-    const prepared = await deps.proxyPreparer.prepareNativeCompact({
-      model: compactModel,
+    // Trust boundary only: the decision model's own question shapes are
+    // upstream's to validate. `state` and a `questions` object are what make a
+    // System One request a System One request at all.
+    if (decision.state === undefined || decision.state === null)
+      throw new GatewayError("invalid_request", 400, "state is required");
+    if (
+      decision.questions === undefined ||
+      decision.questions === null ||
+      typeof decision.questions !== "object" ||
+      Array.isArray(decision.questions)
+    )
+      throw new GatewayError("invalid_request", 400, "questions must be an object");
+    const prepared = await deps.proxyPreparer.prepareNativeService({
+      model: bareModel,
+      serviceKind: "systemone",
       authorization,
-      signal: state.abortController.signal,
+      ...(state.abortController.signal ? { signal: state.abortController.signal } : {}),
     });
-    return runAttemptLoop<Response, CodexCompactAdapter>({
+    return runAttemptLoop<Response, SystemoneAdapter>({
       state,
       deps,
       leaseSource: {
@@ -103,37 +103,56 @@ export function createResponsesCompactHandler(deps: ResponsesCompactHandlerDeps)
       exhaustedError: new GatewayError(
         "admission_unavailable",
         503,
-        "no eligible Codex route",
+        "no eligible System One route",
       ),
       prepare: async (candidate) => {
-        if (!candidate.provider_account_id)
-          throw new GatewayError(
-            "admission_unavailable",
-            503,
-            "Codex compact requires an OAuth account",
-          );
-        const credential = await resolveCredentialForAccount(
-          deps.db,
-          "codex",
-          candidate.provider_account_id,
-          deps.oauthRefreshService && deps.resolveOAuthRefresher
-            ? { refreshService: deps.oauthRefreshService, resolveRefresher: deps.resolveOAuthRefresher }
-            : undefined,
-        );
-        if (credential.credential_kind !== "oauth")
+        const credential = candidate.provider_account_id
+          ? await resolveCredentialForAccount(
+              deps.db,
+              candidate.provider_id,
+              candidate.provider_account_id,
+              deps.oauthRefreshService && deps.resolveOAuthRefresher
+                ? { refreshService: deps.oauthRefreshService, resolveRefresher: deps.resolveOAuthRefresher }
+                : undefined,
+            )
+          : {
+              provider_id: candidate.provider_id as ProviderAdapter["provider_id"],
+              credential_kind: "none" as const,
+            };
+        const adapter = (deps.resolveProviderAdapter
+          ? await deps.resolveProviderAdapter(candidate.provider_id)
+          : deps.providerAdapters.get(candidate.provider_id)) as SystemoneAdapter | undefined;
+        if (!adapter || typeof adapter.systemone !== "function")
           throw new GatewayError(
             "capability_unsupported",
             400,
-            "Responses compact requires a Codex ChatGPT OAuth account",
+            "System One transport unavailable for this provider",
           );
         return { credential, adapter };
       },
       attempt: async (context) => {
         const { candidate, credential, leases, providerCapture } = context;
-        const response = await adapter.compact(compactBody, {
+        const target: ProviderDispatchTarget = {
+          provider_id: candidate.provider_id as ProviderAdapter["provider_id"],
+          model_id: candidate.model_id,
+          wire_family: candidate.wire_family,
+          endpoint_path: candidate.endpoint,
+          capabilities: candidate.capability_profile,
+        };
+        // The caller names the model with its provider prefix
+        // (`opencodeft/jev-1.13-free`); upstream expects the row's own bare id.
+        // Every canonical dispatch rewrites `model` to `candidate.model_id`
+        // (via the codecs), so the native body must do the same or the decision
+        // endpoint answers "Model … is not supported".
+        const upstreamBody =
+          decisionBody.model === candidate.model_id
+            ? decisionBody
+            : { ...decisionBody, model: candidate.model_id };
+        const response = await context.adapter.systemone(upstreamBody, target, {
           credential,
           deadline: state.deadlineMs,
           abort_signal: state.abortController.signal,
+          ...(candidate.user_agent === undefined ? {} : { user_agent: candidate.user_agent }),
           ...(deps.networkBindingFactory
             ? {
                 outbound_fetch: deps.networkBindingFactory.fetch(
@@ -143,13 +162,20 @@ export function createResponsesCompactHandler(deps: ResponsesCompactHandlerDeps)
               }
             : {}),
         });
-        // Prefer the usage the compaction endpoint actually reported. The
-        // estimate is a fixed 1024+1024 reserve, and compaction is by
-        // construction a large-input operation, so charging it unconditionally
-        // let real spend run far past the counter. `usageFromProvider` returns
-        // undefined when the body reported nothing, which keeps the estimate as
-        // the fallback. `response.clone()` leaves the body readable for the
-        // client.
+        if (!response.ok) {
+          // Surface the upstream decision error verbatim: it is the operator's
+          // only signal for a rejected payload, and the attempt loop's retry
+          // classifier reads the status from the thrown error.
+          const detail = await response.text().catch(() => "");
+          throw new GatewayError(
+            response.status >= 500 ? "platform_unavailable" : "invalid_request",
+            response.status,
+            `System One upstream error: ${detail.slice(0, 240)}`,
+          );
+        }
+        // Prefer the usage the decision endpoint reported; fall back to the
+        // fixed native estimate. `response.clone()` leaves the body readable
+        // for the client.
         let reportedUsage: ReturnType<typeof usageFromProvider>;
         try {
           const parsed: unknown = await response.clone().json();
