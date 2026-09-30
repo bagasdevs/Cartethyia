@@ -3,8 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  extractPayloadFileReference,
   isPayloadFileReference,
+  payloadReferenceFromRow,
   prunePayloadFrames,
   readPayloadFrame,
   writePayloadFrame,
@@ -36,17 +36,23 @@ describe(".jsonb telemetry payload storage", () => {
     await expect(readPayloadFrame(reference)).resolves.toEqual({ request: "hello" });
   });
 
-  test("unwraps the wrapped row shape the writer stores", async () => {
+  test("builds a frame reference from typed telemetry_payloads columns", async () => {
     directory = await mkdtemp(join(tmpdir(), "cartethyia-payload-") );
     process.env.CARTETHYIA_TELEMETRY_PAYLOAD_DIR = directory;
     const reference = await writePayloadFrame({ request: "hello" }, new Date(Date.now() + 60_000));
 
-    // `TelemetryPayloadCapture.capture` wraps the reference as
-    // `{ _payload_ref: ... }`; a failed unwrap leaks that raw JSON to the
-    // drawer instead of the captured body.
-    expect(extractPayloadFileReference({ _payload_ref: reference })).toEqual(reference);
-    expect(extractPayloadFileReference(reference)).toEqual(reference);
-    expect(extractPayloadFileReference({ request: "hello" })).toBeUndefined();
+    // Capture writes typed columns, not a jsonb `{ _payload_ref }` wrapper.
+    expect(payloadReferenceFromRow(reference)).toEqual(reference);
+    expect(
+      payloadReferenceFromRow({
+        storage: "s3",
+        file: reference.file,
+        offset: reference.offset,
+        length: reference.length,
+        checksum: reference.checksum,
+        version: 1,
+      }),
+    ).toBeUndefined();
   });
 
   test("prunes expired framed payload files", async () => {

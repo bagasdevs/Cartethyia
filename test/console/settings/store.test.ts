@@ -44,10 +44,16 @@ describe("DrizzleRuntimeSettingsStore", () => {
     }
   });
 
-  test("defaults payload capture to metadata-only", async () => {
+  test("defaults payload capture to metadata", async () => {
     const store = new DrizzleRuntimeSettingsStore(makeDb() as never);
     const result = await store.get("tenant-1");
-    expect(result.telemetryPayloads).toBe("none");
+    expect(result.telemetryPayloads).toBe("metadata");
+  });
+
+  test("round-trips the metadata capture mode", async () => {
+    const store = new DrizzleRuntimeSettingsStore(makeDb() as never);
+    const result = await store.update("tenant-1", { telemetryPayloads: "metadata" });
+    expect(result.telemetryPayloads).toBe("metadata");
   });
 
   test("updates active settings through the upsert shape", async () => {

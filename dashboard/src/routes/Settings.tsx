@@ -45,7 +45,10 @@ function PrivacyPanel(): ReactNode {
                 value={settings.telemetryPayloads}
                 onValueChange={(value) =>
                   mutation.mutate(
-                    { telemetryPayloads: value === "none" ? "none" : "bounded" },
+                    {
+                      telemetryPayloads:
+                        value === "bounded" || value === "metadata" ? value : "none",
+                    },
                     {
                       onError: (error) =>
                         toast.error(getErrorMessage(error, "Could not update payload capture.")),
@@ -53,13 +56,21 @@ function PrivacyPanel(): ReactNode {
                   )
                 }
                 options={[
-                  { value: "none", label: "Off — metadata only (default)" },
-                  { value: "bounded", label: "On — temporary bodies, pruned after 15 minutes" },
+                  {
+                    value: "metadata",
+                    label: "Metadata — Proxy→Provider method + headers (default), pruned after 15 minutes",
+                  },
+                  {
+                    value: "bounded",
+                    label: "Bodies — temporary request/response capture, pruned after 15 minutes",
+                  },
+                  { value: "none", label: "Off — no payload capture" },
                 ]}
               />
               <p style={{ fontSize: "11px", color: "var(--text-tertiary)", marginTop: "4px" }}>
-                Request metadata is always retained. Body capture is opt-in, redacted, and deleted
-                automatically after 15 minutes.
+                Request-event metadata is always retained. Default drawer capture is metadata-only
+                (Proxy→Provider method + allowlisted headers). Bodies stay opt-in, redacted, and
+                deleted automatically after 15 minutes.
               </p>
             </div>
             <div>

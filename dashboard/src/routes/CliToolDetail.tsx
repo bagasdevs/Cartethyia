@@ -89,6 +89,7 @@ function CliToolDetailBody({
 }): ReactNode {
   // User MUST manually select the API key — no auto-select.
   const [selectedKeyId, setSelectedKeyId] = useState("");
+  const [selectedMappingOwnerId, setSelectedMappingOwnerId] = useState("");
   const [endpoint, setEndpoint] = useState(() =>
     typeof window === "undefined" ? "http://localhost:12800" : window.location.origin,
   );
@@ -102,18 +103,22 @@ function CliToolDetailBody({
   // Track the last-saved mapping state to avoid re-saving unchanged data.
   const lastSavedRef = useRef<string | null>(null);
 
-  // Only personal keys carry a recoverable encrypted secret; share templates
-  // have no key_encrypted column and cannot be resolved server-side.
+  // Personal keys supply config secrets; root share templates can own inherited mappings.
   const personalKeys = useMemo(
     () => apiKeys.filter((key) => key.keyMode === "personal"),
     [apiKeys],
   );
+  const mappingOwners = useMemo(
+    () => apiKeys.filter((key) => key.keyMode === "share" && key.parentKeyId === undefined),
+    [apiKeys],
+  );
+  const effectiveMappingOwnerId = selectedMappingOwnerId || selectedKeyId;
 
-  // Mappings are per-(tool, key): reload whenever the user picks a different key.
-  const mappingsQuery = useToolMappings(tool.id, selectedKeyId);
+  // Mapping profiles are keyed by their owner, independently of the credential selected below.
+  const mappingsQuery = useToolMappings(tool.id, effectiveMappingOwnerId);
   const saveMappings = useSaveToolMappings();
-  const downloadTool = useDownloadTool();
   const updateApiKey = useUpdateApiKey();
+  const downloadTool = useDownloadTool();
 
   const selectedKey = personalKeys.find((key) => key.id === selectedKeyId);
   const cliEligible = selectedKey?.scopes?.includes("routing:cli_mapping") === true;
@@ -127,11 +132,11 @@ function CliToolDetailBody({
     setSlotModels(defaults);
     setMappingTargets({});
     lastSavedRef.current = null;
-  }, [tool, selectedKeyId]);
+  }, [tool, selectedKeyId, effectiveMappingOwnerId]);
 
   useEffect(() => {
     const settings = mappingsQuery.data;
-    if (!settings) return;
+    if (!settings || settings.apiKeyId !== effectiveMappingOwnerId) return;
     setMappingEnabled(settings.enabled);
     if (settings.mappings.length > 0) {
       setSlotModels((prev) => ({
@@ -150,7 +155,7 @@ function CliToolDetailBody({
       setMappingTargets({});
     }
     lastSavedRef.current = JSON.stringify({ enabled: settings.enabled, mappings: settings.mappings });
-  }, [mappingsQuery.data, tool.defaultModels]);
+  }, [effectiveMappingOwnerId, mappingsQuery.data, tool.defaultModels]);
 
   const installed = status?.installed ?? false;
   const configured = status?.configured ?? false;
@@ -180,19 +185,18 @@ function CliToolDetailBody({
     };
   }, [mappingEnabled, mappingTargets, slotModels, tool.defaultModels, tool.mappingSupported]);
 
-  // Auto-save on select / edit: whenever targets, slots, or toggle change and
-  // an API key is selected, debounce-save to the backend.
+  // Auto-save to the selected profile; credentials remain independently selected below.
   useEffect(() => {
-    if (!tool.mappingSupported || selectedKeyId.length === 0) return;
+    if (!tool.mappingSupported || effectiveMappingOwnerId.length === 0) return;
     const server = mappingsQuery.data;
-    if (!server || server.apiKeyId !== selectedKeyId) return;
+    if (!server || server.apiKeyId !== effectiveMappingOwnerId) return;
     const input = buildMappingInput();
     if (!input) return;
     const fingerprint = JSON.stringify({ enabled: input.enabled, mappings: input.mappings });
     if (fingerprint === lastSavedRef.current) return;
     const timer = setTimeout(() => {
       saveMappings.mutate(
-        { toolId: tool.id, keyId: selectedKeyId, input },
+        { toolId: tool.id, keyId: effectiveMappingOwnerId, input },
         {
           onSuccess: () => {
             lastSavedRef.current = fingerprint;
@@ -202,7 +206,7 @@ function CliToolDetailBody({
       );
     }, 600);
     return () => clearTimeout(timer);
-  }, [buildMappingInput, mappingsQuery.data, saveMappings, selectedKeyId, tool.id, tool.mappingSupported]);
+  }, [buildMappingInput, effectiveMappingOwnerId, mappingsQuery.data, saveMappings, tool.id, tool.mappingSupported]);
 
   const buildApplyInput = useCallback((): ApplyInput => {
     const modelSlots = Object.fromEntries(
@@ -221,6 +225,7 @@ function CliToolDetailBody({
       ...(subagent
         ? { subagentModel: slotModels[subagent.alias] ?? subagent.defaultValue ?? subagent.id }
         : {}),
+      mappingOwnerId: effectiveMappingOwnerId,
       ...(tool.mappingSupported ? { mapping: buildMappingInput() } : {}),
       ...(tool.id === "claude" ? { bypassPermissions } : {}),
     };
@@ -228,6 +233,7 @@ function CliToolDetailBody({
     activeModels,
     buildMappingInput,
     bypassPermissions,
+    effectiveMappingOwnerId,
     endpoint,
     slotModels,
     tool,
@@ -379,6 +385,23 @@ function CliToolDetailBody({
                 onChange={(e) => setEndpoint(e.target.value)}
               />
             </div>
+            {tool.mappingSupported ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <Select
+                  label="Remote mapping profile"
+                  id="mapping-owner-select"
+                  value={effectiveMappingOwnerId}
+                  onValueChange={setSelectedMappingOwnerId}
+                  options={[
+                    { value: selectedKeyId, label: selectedKey ? `${selectedKey.label} — API key profile` : "Select an API key first" },
+                    ...mappingOwners.map((key) => ({ value: key.id, label: `${key.label} — shared profile` })),
+                  ]}
+                />
+                <span style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>
+                  Save Claude model routes once on a share template; its child keys inherit them.
+                </span>
+              </div>
+            ) : null}
           </Stack>
         </CardBody>
       </Card>

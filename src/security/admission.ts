@@ -607,7 +607,7 @@ export class ApiKeyAdmissionService {
         // the admission identity. Share children share the parent's counter
         // namespace for enforcement, but attribution must still land on the
         // child row so recipient usage and sumChildrenConsumed stay correct.
-        if (snapshot.lifetime_token_budget != null && this.persistLifetimeUsage) {
+        if (this.persistLifetimeUsage) {
           try {
             await this.persistLifetimeUsage({ apiKeyId: snapshot.api_key_id, delta: actual });
           } catch {

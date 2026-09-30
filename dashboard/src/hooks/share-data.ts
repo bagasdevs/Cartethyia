@@ -14,6 +14,14 @@ export interface ShareLinkPolicyData {
   readonly modelDenylist: string[] | null;
   readonly modelPrefix: string | null;
   readonly notes: { readonly title: string | null; readonly subtitle: string | null; readonly body: string | null };
+  readonly sharePopup: {
+    readonly mode: "donation" | "information" | null;
+    readonly imageUrl: string | null;
+    readonly title: string | null;
+    readonly body: string | null;
+    readonly actionLabel: string | null;
+    readonly actionUrl: string | null;
+  };
   readonly expiresAt: string | null;
 }
 

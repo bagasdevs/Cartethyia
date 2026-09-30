@@ -103,6 +103,32 @@ describe("ApiKeyAdmissionService", () => {
     await lease.release();
     await lease2.release();
   });
+  test("persists committed usage even when the key has no lifetime budget", async () => {
+    const store = new InMemoryAdmissionCounterStore();
+    const persisted: Array<{ apiKeyId: string; delta: number }> = [];
+    const svc = new ApiKeyAdmissionService(store, undefined, undefined, async (entry) => {
+      persisted.push(entry);
+    });
+    const auth = snapshot({ api_key_id: "unlimited-personal-key" });
+    const lease = await svc.admit({
+      authorization: auth,
+      targetProvider: "openai",
+      targetModel: "gpt-5",
+      estimatedInputTokens: 10,
+    });
+
+    await lease.commitUsage({
+      input_tokens: 23,
+      output_tokens: 7,
+      cached_input_tokens: 0,
+      cache_write_tokens: 0,
+      uncached_input_tokens: 23,
+      reasoning_tokens: 0,
+      estimated_cost: null,
+    });
+
+    expect(persisted).toEqual([{ apiKeyId: "unlimited-personal-key", delta: 30 }]);
+  });
 
   /**
    * The in-memory store is the documented `REDIS_MODE=single_instance_local`

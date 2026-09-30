@@ -241,6 +241,7 @@ prefix-length hints leave the store.
   request, so the route serializes it explicitly. A key may also carry `clientRouterDenylist`, the ids of downstream
   routers it refuses (see `security/SECURITY.md`); the write path rejects an id the gateway
   cannot fingerprint, so a stored rule is always one that can match.
+- Each key can optionally configure a `sharePopupMode` (`donation` or `information`) with image URL, title, message, and HTTPS/mailto action. It travels with both enrollment and handoff public policy and is opened only by a visitor clicking the button below Base URL; it is never auto-opened.
 - **Studio** (`studio/`): CRUD over per-tenant saved sessions (capped, messages and media
   normalized and bounded on write and read), a tenant-scoped `web-fetch` tool over
   the validated outbound network binding, plus a key endpoint that decrypts the tenant's default
@@ -308,6 +309,10 @@ Status reads are host probes (`dashboard:read`) whose `ToolStatus` reports `inst
 `configured`, settings path, endpoint, key prefix, and models. Slot mappings are validated
 against the tool's `defaultModels` aliases, rejecting unknown slots and empty endpoints, then
 persisted with removed slots pruned and audited as `cli_tool.mappings_saved`.
+
+Mapping profiles can be saved to a top-level share template. A shared child's request resolves
+the template's mapping bucket, while the dashboard selects a separate personal API key for the
+CLI credential written into config. Children need no individual mapping rows.
 
 Mapping is opt-out at the tenant configuration layer, but **request-time CLI mapping is API-key
 gated**: only keys carrying the `routing:cli_mapping` scope may consume these source→target rows,
@@ -472,8 +477,10 @@ IPs unless `privacyMode` is `full` (fail-closed: any read error masks).
   unlimited, read on the request path.
 - `thinkingNormalizationEnabled` (default `false`) normalizes provider thinking blocks;
   `responsesReasoningSummary` (default `detailed`) maps effort for the Responses surface.
-  `telemetryPayloads` (`bounded` | `none`, default `none`) controls whether short-lived request/response
-  bodies are retained for Usage inspection; metadata is always stored, payload capture is opt-in.
+  `telemetryPayloads` (`metadata` | `bounded` | `none`, default `metadata`) controls drawer
+  capture for Usage inspection: `metadata` (default) keeps only the Proxy→Provider request line
+  (method + allowlisted headers), `bounded` keeps redacted bodies, `none` turns drawer capture
+  off; request-event metadata is always stored, body capture stays opt-in and TTL'd.
 - `privacyMode` (`masked` | `full`, default `masked`) makes full client-IP display an explicit
   opt-in, and every reader fails closed to masked.
 

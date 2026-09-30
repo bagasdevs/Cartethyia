@@ -11,7 +11,7 @@ A request failed or behaved oddly and you need the *actual bytes*: the upstream 
 Two tables in DB `cartethyia` (`DATABASE_URL` in `.env`):
 
 - `telemetry_events` — one row per request: `request_id`, `provider_id`, `requested_model`, `status` (`completed`/`failed`/`cancelled`), `error_category`, `endpoint`, `source_surface`, `stream`, `latency_ms`, `created_at`. Start here; filter by `requested_model ILIKE` or `error_category`.
-- `telemetry_payloads` — keyed by `request_id`. Each column (`request_body`, `response_body`, `client_response_body`, `provider_request_body`, `provider_response_body`) holds either inline JSON or a reference `{ "_payload_ref": { file, offset, length, checksum, storage, version } }` pointing into `data/telemetry-payloads/<file>.jsonb`.
+- `telemetry_payloads` — keyed by `request_id`. Typed file-reference columns only (`storage`, `file`, `offset`, `length`, `checksum`, `version`) pointing into `data/telemetry-payloads/<file>.jsonb`. Bodies never live in Postgres.
 
 Find a row by request id:
 
@@ -20,7 +20,7 @@ const { Client } = await import("pg");
 const c = new Client({ connectionString: "postgres://postgres@localhost:5432/cartethyia" });
 await c.connect();
 const r = await c.query(
-  "SELECT request_id, request_body FROM telemetry_payloads WHERE request_id = $1::uuid",
+  "SELECT request_id, storage, file, \"offset\", length, checksum, version FROM telemetry_payloads WHERE request_id = $1::uuid",
   ["<request-id>"],
 );
 ```
@@ -89,7 +89,7 @@ Walk one gateway request from its `request_id`:
    ```
    Key fields: `status` (`completed|failed|cancelled|truncated`), `error_category`, `error_origin` (`cartethyia|upstream|network`), `ttfb_ms`, `first_content_delta_at_ms` (null ⇒ no content ever reached the client), `latency_ms`, `requested_model`, `provider_id`.
 
-   Payloads: `telemetry_payloads` row → `{_payload_ref}` → decode frames (see above; ~15 min retention — read immediately). If every column shows `{_truncated, _original_bytes}` the bodies are unrecoverable; sizes still inform (e.g. 6.7 MB request). Drawer "45B" panels are ref/marker bytes, not payload size.
+   Payloads: `telemetry_payloads` row → typed file columns → decode frames (see above; ~15 min retention — read immediately). If every body shows `{_truncated, _original_bytes}` the content is unrecoverable; sizes still inform (e.g. 6.7 MB request). Drawer "45B" panels are marker bytes, not payload size.
 
 2. **Interpret the signature:**
    - `completed` → done; not a failure.
@@ -117,7 +117,7 @@ Walk one gateway request from its `request_id`:
 
 ## Gotchas
 
-- **`_payload_ref` is nested one level deeper than it looks:** the column value is `{_payload_ref:{...}}`, so `value.file` is `undefined` — use `value._payload_ref.file`.
+- **Frame refs are typed columns now:** read `storage`/`file`/`offset`/`length`/`checksum`/`version` from the row — there is no jsonb `{_payload_ref:{...}}` wrapper to unwrap.
 - Frames expire. If the payload is already gone, replay the *shape* instead: rebuild the frame sequence from the transcript and feed it to the parser. That still proves a parser fix even when the original bytes are unavailable.
 - Outbound request headers were historically not captured at all; only the allowlisted non-secret set (`x-grok-*`, session ids, `user-agent`) appears under `provider_request_body.headers`. Do not conclude a header was absent just because an older frame omits it.
 - Oversized payloads are truncated to `{ _truncated: true, _original_bytes: N }` above ~1 MB; the bytes are not recoverable.

@@ -64,7 +64,7 @@ function parseMapping(value: unknown): CliMappingInput | undefined {
  */
 function parseApplyInput(
   body: unknown,
-): (ApplyInput & { keyId: string; mapping?: CliMappingInput; mode?: "file" | "remote" | "both" }) | undefined {
+): (ApplyInput & { keyId: string; mappingOwnerId?: string; mapping?: CliMappingInput; mode?: "file" | "remote" | "both" }) | undefined {
   const value =
     typeof body === "object" && body !== null && !Array.isArray(body)
       ? (body as Record<string, unknown>)
@@ -95,8 +95,10 @@ function parseApplyInput(
     ...(Object.keys(modelSlots).length > 0 ? { modelSlots } : {}),
     ...(typeof value.activeModel === "string" ? { activeModel: value.activeModel } : {}),
     ...(typeof value.subagentModel === "string" ? { subagentModel: value.subagentModel } : {}),
+    ...(typeof value.mappingOwnerId === "string" && value.mappingOwnerId.length > 0
+      ? { mappingOwnerId: value.mappingOwnerId }
+      : {}),
     ...(mapping !== undefined ? { mapping } : {}),
-    ...(value.bypassPermissions === true ? { bypassPermissions: true } : {}),
     ...(value.mode === "file" || value.mode === "remote" || value.mode === "both"
       ? { mode: value.mode }
       : {}),
@@ -106,6 +108,7 @@ function parseApplyInput(
 const applyBody = t.Object({
   endpoint: t.String(),
   keyId: t.String(),
+  mappingOwnerId: t.Optional(t.String()),
   mode: t.Optional(t.Union([t.Literal("file"), t.Literal("remote"), t.Literal("both")])),
   models: t.Array(t.String()),
   modelSlots: t.Optional(t.Record(t.String(), t.String())),
@@ -281,7 +284,7 @@ export function createCliToolsRoutes(config: CliToolsRoutesConfig): Elysia {
           };
         }
         const input = await service.withResolvedSecret(access.tenantId, parsed);
-        const result = await service.applyConfig(access.tenantId, params.toolId, parsed.keyId, {
+        const result = await service.applyConfig(access.tenantId, params.toolId, parsed.mappingOwnerId ?? parsed.keyId, {
           ...input,
           ...(parsed.mode ? { mode: parsed.mode } : {}),
         });

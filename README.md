@@ -154,12 +154,12 @@ REDIS_URL                    # unless REDIS_MODE=single_instance_local
 
 The environment drift test keeps literal `process.env.*` reads documented:
 
-Per-tenant runtime settings control request-body capture: `telemetryPayloads`
-defaults to `none` (request-body capture off). Setting it to `bounded` opts a
-tenant into redacted, size-limited capture with a 15-minute TTL. The active
-environment template also exposes
-the local `.jsonb` backing-store directory, file-size bound, and retention
-override.
+Per-tenant runtime settings control payload capture: `telemetryPayloads`
+defaults to `metadata` (Proxy→Provider method + allowlisted headers only).
+`bounded` opts a tenant into redacted, size-limited body capture; `none` turns
+drawer capture off. Both capture modes use a 15-minute TTL. The active
+environment template also exposes the local `.jsonb` backing-store directory,
+file-size bound, and retention override.
 
 ```bash
 bun test test/config-env-drift.test.ts
@@ -263,6 +263,8 @@ A backup carries a tenant's own configuration and its request telemetry, not the
 shared built-in catalog (the build re-supplies that) and not captured
 prompt/response bodies. Restore replaces the importing tenant's config rows,
 merges telemetry without duplicating it, and cannot touch another tenant's rows.
+
+Public share links may include an optional donation or information popup with an image, copy, and HTTPS/mailto action. Visitors open it from the button under Base URL; it never interrupts page load.
 It is not a substitute for a database dump.
 
 ## Providers and egress

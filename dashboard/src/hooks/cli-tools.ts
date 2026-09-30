@@ -51,8 +51,8 @@ export function useSaveToolMappings() {
           method: "POST",
           body: JSON.stringify({ ...input, keyId }),
         }),
-      onSuccess: async (_r, vars) => {
-        await qc.invalidateQueries({ queryKey: queryKeys.cliTools.mappings(vars.toolId, vars.keyId) });
+      onSuccess: async (_result, { toolId, keyId }) => {
+        await qc.invalidateQueries({ queryKey: queryKeys.cliTools.mappings(toolId, keyId) });
       },
     },
   );

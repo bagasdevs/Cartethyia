@@ -117,4 +117,24 @@ describe("API-key scoped CLI model mappings", () => {
       new RoutingEngine().plan("claude-opus-5-5[1m]", snapshot(), TENANT_ID, undefined, true, "other-key"),
     ).rejects.toMatchObject({ code: "model_not_found" });
   });
+  test("applies a share-template mapping to its child key without child-specific rows", async () => {
+    const parentId = "share-template";
+    const childId = "shared-child";
+    const inheritedSnapshot: RouteSnapshot = {
+      ...snapshot(),
+      cli_aliases: {
+        [`${TENANT_ID}:${parentId}`]: { sonnet: "workbuddy/hy4-preview-f" },
+      },
+    };
+    const plan = await new RoutingEngine().plan(
+      "sonnet",
+      inheritedSnapshot,
+      TENANT_ID,
+      undefined,
+      true,
+      parentId,
+    );
+    expect(plan.resolved_model).toBe("workbuddy/hy4-preview-f");
+    expect(inheritedSnapshot.cli_aliases?.[`${TENANT_ID}:${childId}`]).toBeUndefined();
+  });
 });

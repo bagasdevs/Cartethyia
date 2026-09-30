@@ -69,6 +69,12 @@ export function createApiKeyOperations(config: ApiKeyConfig) {
         ...(request.notesTitle === undefined ? {} : { notesTitle: request.notesTitle }),
         ...(request.notesSubtitle === undefined ? {} : { notesSubtitle: request.notesSubtitle }),
         ...(request.notesBody === undefined ? {} : { notesBody: request.notesBody }),
+        ...(request.sharePopupMode == null ? {} : { sharePopupMode: request.sharePopupMode }),
+        ...(request.sharePopupImageUrl?.trim() ? { sharePopupImageUrl: request.sharePopupImageUrl.trim() } : {}),
+        ...(request.sharePopupTitle?.trim() ? { sharePopupTitle: request.sharePopupTitle.trim() } : {}),
+        ...(request.sharePopupBody?.trim() ? { sharePopupBody: request.sharePopupBody.trim() } : {}),
+        ...(request.sharePopupActionLabel?.trim() ? { sharePopupActionLabel: request.sharePopupActionLabel.trim() } : {}),
+        ...(request.sharePopupActionUrl?.trim() ? { sharePopupActionUrl: request.sharePopupActionUrl.trim() } : {}),
         ...(request.requestsPerMinute == null ? {} : { requestsPerMinute: request.requestsPerMinute }),
         ...(request.dailyTokenLimit == null ? {} : { dailyTokenLimit: request.dailyTokenLimit }),
         ...(request.monthlyTokenLimit == null ? {} : { monthlyTokenLimit: request.monthlyTokenLimit }),
@@ -172,6 +178,12 @@ export function createApiKeyOperations(config: ApiKeyConfig) {
         ...(patchRequest.notesBody === undefined
           ? {}
           : { notesBody: patchRequest.notesBody.trim() === "" ? null : patchRequest.notesBody }),
+        ...(patchRequest.sharePopupMode === undefined ? {} : { sharePopupMode: patchRequest.sharePopupMode }),
+        ...(patchRequest.sharePopupImageUrl === undefined ? {} : { sharePopupImageUrl: patchRequest.sharePopupImageUrl.trim() || null }),
+        ...(patchRequest.sharePopupTitle === undefined ? {} : { sharePopupTitle: patchRequest.sharePopupTitle.trim() || null }),
+        ...(patchRequest.sharePopupBody === undefined ? {} : { sharePopupBody: patchRequest.sharePopupBody.trim() || null }),
+        ...(patchRequest.sharePopupActionLabel === undefined ? {} : { sharePopupActionLabel: patchRequest.sharePopupActionLabel.trim() || null }),
+        ...(patchRequest.sharePopupActionUrl === undefined ? {} : { sharePopupActionUrl: patchRequest.sharePopupActionUrl.trim() || null }),
         ...(patchRequest.requestsPerMinute === undefined ? {} : { requestsPerMinute: patchRequest.requestsPerMinute }),
         ...(patchRequest.dailyTokenLimit === undefined ? {} : { dailyTokenLimit: patchRequest.dailyTokenLimit }),
         ...(patchRequest.monthlyTokenLimit === undefined ? {} : { monthlyTokenLimit: patchRequest.monthlyTokenLimit }),
@@ -517,6 +529,12 @@ const apiKeyBody = t.Object({
   notesTitle: t.Optional(t.String()),
   notesSubtitle: t.Optional(t.String()),
   notesBody: t.Optional(t.String()),
+  sharePopupMode: t.Optional(t.Union([literalUnion(["donation", "information"] as const), t.Null()])),
+  sharePopupImageUrl: t.Optional(t.Union([t.String({ maxLength: 2048 }), t.Null()])),
+  sharePopupTitle: t.Optional(t.Union([t.String({ maxLength: 120 }), t.Null()])),
+  sharePopupBody: t.Optional(t.Union([t.String({ maxLength: 1200 }), t.Null()])),
+  sharePopupActionLabel: t.Optional(t.Union([t.String({ maxLength: 40 }), t.Null()])),
+  sharePopupActionUrl: t.Optional(t.Union([t.String({ maxLength: 2048 }), t.Null()])),
 });
 
 const apiKeyShareBody = t.Object({

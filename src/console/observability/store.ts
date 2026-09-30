@@ -25,7 +25,7 @@ import type {
 } from "./contracts";
 import { maskClientIp } from "../../observability/redaction";
 import { splitEndpointConfig } from "../../network/pool/agent";
-import { extractPayloadFileReference, readPayloadFrame } from "../../observability/payload-store";
+import { payloadReferenceFromRow, readPayloadFrame } from "../../observability/payload-store";
 import { ConsoleDomainError } from "../shared/errors";
 import { shouldMaskClientIp } from "../shared/ip-privacy";
 import { gatewayErrorSql } from "../../observability/telemetry-status";
@@ -689,7 +689,7 @@ export class DrizzleObservabilityStore implements ObservabilityStore {
       .orderBy(desc(telemetryPayloads.capturedAt))
       .limit(1);
     const payloadRow = linkedPayloadRows[0]?.payload;
-    const captured = await readCapturedBodies(payloadRow?.requestBody);
+    const captured = await readCapturedBodies(payloadRow);
     if (!captured) {
       return { ...presented, payloads: null };
     }
@@ -771,7 +771,7 @@ export class DrizzleObservabilityStore implements ObservabilityStore {
       .limit(1);
     const payloadRow = payloadRows[0];
     if (!payloadRow) return base;
-    const captured = await readCapturedBodies(payloadRow.requestBody);
+    const captured = await readCapturedBodies(payloadRow);
     if (!captured) return base;
     return {
       ...base,
@@ -786,13 +786,25 @@ export class DrizzleObservabilityStore implements ObservabilityStore {
 /**
  * Reads the captured bodies behind one `telemetry_payloads` row.
  *
- * The row stores only `{ _payload_ref }`; every body lives in the frame file it
- * points at. Returns `undefined` when there is no row, no reference, or the
- * frame cannot be read — all three mean "nothing to show", and the caller
- * renders the request without a payload section. The raw reference is never
- * returned to a caller, so it cannot reach the dashboard.
+ * The row stores typed frame-reference columns only; every body lives in the
+ * frame file those columns name. Returns `undefined` when there is no row, no
+ * usable reference, or the frame cannot be read — all three mean "nothing to
+ * show", and the caller renders the request without a payload section. The raw
+ * reference is never returned to a caller, so it cannot reach the dashboard.
  */
-async function readCapturedBodies(referenceColumn: unknown): Promise<
+async function readCapturedBodies(
+  row:
+    | {
+        readonly storage: string;
+        readonly file: string;
+        readonly offset: number;
+        readonly length: number;
+        readonly checksum: string;
+        readonly version: number;
+      }
+    | null
+    | undefined,
+): Promise<
   | {
       request: unknown;
       response: unknown;
@@ -802,7 +814,8 @@ async function readCapturedBodies(referenceColumn: unknown): Promise<
     }
   | undefined
 > {
-  const reference = extractPayloadFileReference(referenceColumn);
+  if (!row) return undefined;
+  const reference = payloadReferenceFromRow(row);
   if (!reference) return undefined;
   const stored = await readPayloadFrame(reference);
   if (!stored || typeof stored !== "object") return undefined;

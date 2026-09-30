@@ -31,7 +31,7 @@ Anti-loop rules: never add the same log/assertion twice (a tap that didn't answe
 Done when: you can name the exact stage (surface parse, routing plan, lease, adapter codec, upstream) and point at the telemetry row plus payload proving it.
 
 1. Trace the wire path first — surface (`chat`/`responses`/`messages`/`completion`) → canonical request → router candidate (`provider_id` + `wire_family`) → adapter codec. Never start at the adapter; most "provider bugs" are routing/capability decisions made earlier.
-2. Split causes with the two telemetry tables: `telemetry_events` (`requested_model`, `provider_id`, `network_pool_id`, `status`, `error_category`, `error_origin`) tells fingerprint vs pool vs routing; `telemetry_payloads` is only an index (`{ _payload_ref }` → read the frame file for client/provider bodies).
+2. Split causes with the two telemetry tables: `telemetry_events` (`requested_model`, `provider_id`, `network_pool_id`, `status`, `error_category`, `error_origin`) tells fingerprint vs pool vs routing; `telemetry_payloads` is only a typed file-ref index (`storage`/`file`/`offset`/`length`/`checksum`/`version` → read the frame file for client/provider bodies).
    ```sql
    SELECT requested_model, provider_id, network_pool_id, status, error_category, error_origin
      FROM telemetry_events ORDER BY created_at DESC LIMIT 20;
@@ -96,7 +96,7 @@ Done when: you can attribute it to capability degradation, a wrong persisted row
 ### Appendix: dropped image attachment
 
 A. Gateway receive? Group telemetry by client on `request_body` containing `image_url` — `with_img = 0` means the client never sent it: client bug, stop. Payload rows expire (~15 min TTL); extract hashes immediately.
-B. Gateway forward? Diff `request_body` vs `provider_request_body` in the frame the row's `_payload_ref` names (`data:image` counts + lengths). Equal = lossless, look downstream.
+B. Gateway forward? Diff `request_body` vs `provider_request_body` in the frame the row's typed file columns name (`data:image` counts + lengths). Equal = lossless, look downstream.
 C. Ablate shape with a tiny test PNG: (a) text+image in one message, (b) image-only then text-only, (c) image-only then two texts, (d) repeat (a) on a second model. Bundled works but split loses the image on one provider only → upstream merges same-role messages and drops the image part; fix that adapter (coalesce text+image) with a regression test on the provider-bound payload.
 D. `image` falls open for every codec-backed wire — the route carries the part and the upstream decides. Only bespoke adapters (Cursor, Devin; `providerUsesBespokeWire`) need an explicit `image` modality, since they frame their own protocol.
 

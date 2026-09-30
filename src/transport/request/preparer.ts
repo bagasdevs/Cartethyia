@@ -368,7 +368,7 @@ export class ProxyRequestPreparer {
       authorization.tenantId,
       request.model,
       allowCliMappings,
-      authorization.id,
+      authorization.cliMappingOwnerId ?? authorization.id,
     );
     // Pass `request.model` as the requested name so an allowlisted alias / a
     // CLI remapping can authorize the resolved target (see modelRejectionReason).
@@ -420,7 +420,7 @@ export class ProxyRequestPreparer {
           authorization.tenantId,
           variant.required,
           allowCliMappings,
-          authorization.id,
+          authorization.cliMappingOwnerId ?? authorization.id,
         );
       } catch (error) {
         if (error instanceof GatewayError && error.code === "capability_unsupported") continue;

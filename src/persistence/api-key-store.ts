@@ -23,6 +23,12 @@ export interface ApiKeyRecord {
   readonly notesTitle?: string;
   readonly notesSubtitle?: string;
   readonly notesBody?: string;
+  readonly sharePopupMode?: "donation" | "information";
+  readonly sharePopupImageUrl?: string;
+  readonly sharePopupTitle?: string;
+  readonly sharePopupBody?: string;
+  readonly sharePopupActionLabel?: string;
+  readonly sharePopupActionUrl?: string;
   readonly requestsPerMinute?: number;
   readonly dailyTokenLimit?: number;
   readonly monthlyTokenLimit?: number;
@@ -60,6 +66,12 @@ export interface ApiKeyPatch
     | "notesTitle"
     | "notesSubtitle"
     | "notesBody"
+    | "sharePopupMode"
+    | "sharePopupImageUrl"
+    | "sharePopupTitle"
+    | "sharePopupBody"
+    | "sharePopupActionLabel"
+    | "sharePopupActionUrl"
     | "requestsPerMinute"
     | "dailyTokenLimit"
     | "monthlyTokenLimit"
@@ -72,6 +84,12 @@ export interface ApiKeyPatch
   readonly notesTitle?: string | null;
   readonly notesSubtitle?: string | null;
   readonly notesBody?: string | null;
+  readonly sharePopupMode?: "donation" | "information" | null;
+  readonly sharePopupImageUrl?: string | null;
+  readonly sharePopupTitle?: string | null;
+  readonly sharePopupBody?: string | null;
+  readonly sharePopupActionLabel?: string | null;
+  readonly sharePopupActionUrl?: string | null;
   readonly requestsPerMinute?: number | null;
   readonly dailyTokenLimit?: number | null;
   readonly monthlyTokenLimit?: number | null;
@@ -113,6 +131,12 @@ export class DrizzleApiKeyStore implements ApiKeyStore {
       ...(row.notesTitle === null ? {} : { notesTitle: row.notesTitle }),
       ...(row.notesSubtitle === null ? {} : { notesSubtitle: row.notesSubtitle }),
       ...(row.notesBody === null ? {} : { notesBody: row.notesBody }),
+      ...(row.sharePopupMode === null ? {} : { sharePopupMode: row.sharePopupMode as "donation" | "information" }),
+      ...(row.sharePopupImageUrl === null ? {} : { sharePopupImageUrl: row.sharePopupImageUrl }),
+      ...(row.sharePopupTitle === null ? {} : { sharePopupTitle: row.sharePopupTitle }),
+      ...(row.sharePopupBody === null ? {} : { sharePopupBody: row.sharePopupBody }),
+      ...(row.sharePopupActionLabel === null ? {} : { sharePopupActionLabel: row.sharePopupActionLabel }),
+      ...(row.sharePopupActionUrl === null ? {} : { sharePopupActionUrl: row.sharePopupActionUrl }),
       ...(row.requestsPerMinute === null ? {} : { requestsPerMinute: row.requestsPerMinute }),
       ...(row.dailyTokenLimit === null ? {} : { dailyTokenLimit: row.dailyTokenLimit }),
       ...(row.monthlyTokenLimit === null ? {} : { monthlyTokenLimit: row.monthlyTokenLimit }),
@@ -173,6 +197,12 @@ export class DrizzleApiKeyStore implements ApiKeyStore {
       notesTitle: record.notesTitle ?? null,
       notesSubtitle: record.notesSubtitle ?? null,
       notesBody: record.notesBody ?? null,
+      sharePopupMode: record.sharePopupMode ?? null,
+      sharePopupImageUrl: record.sharePopupImageUrl ?? null,
+      sharePopupTitle: record.sharePopupTitle ?? null,
+      sharePopupBody: record.sharePopupBody ?? null,
+      sharePopupActionLabel: record.sharePopupActionLabel ?? null,
+      sharePopupActionUrl: record.sharePopupActionUrl ?? null,
       requestsPerMinute: record.requestsPerMinute ?? null,
       dailyTokenLimit: record.dailyTokenLimit ?? null,
       monthlyTokenLimit: record.monthlyTokenLimit ?? null,
@@ -229,6 +259,12 @@ export class DrizzleApiKeyStore implements ApiKeyStore {
           ...(patch.notesTitle !== undefined ? { notesTitle: patch.notesTitle } : {}),
           ...(patch.notesSubtitle !== undefined ? { notesSubtitle: patch.notesSubtitle } : {}),
           ...(patch.notesBody !== undefined ? { notesBody: patch.notesBody } : {}),
+          ...(patch.sharePopupMode !== undefined ? { sharePopupMode: patch.sharePopupMode } : {}),
+          ...(patch.sharePopupImageUrl !== undefined ? { sharePopupImageUrl: patch.sharePopupImageUrl } : {}),
+          ...(patch.sharePopupTitle !== undefined ? { sharePopupTitle: patch.sharePopupTitle } : {}),
+          ...(patch.sharePopupBody !== undefined ? { sharePopupBody: patch.sharePopupBody } : {}),
+          ...(patch.sharePopupActionLabel !== undefined ? { sharePopupActionLabel: patch.sharePopupActionLabel } : {}),
+          ...(patch.sharePopupActionUrl !== undefined ? { sharePopupActionUrl: patch.sharePopupActionUrl } : {}),
           ...(patch.requestsPerMinute !== undefined
             ? { requestsPerMinute: patch.requestsPerMinute }
             : {}),

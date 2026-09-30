@@ -9,6 +9,7 @@ import type { CartethyiaDatabase } from "../../persistence/postgres";
 import { TelemetryPayloadCapture } from "../../observability/payload-capture";
 import type { TelemetryBatchBuffer } from "../../observability/telemetry-buffer";
 import { CachedPreferencesReader, DrizzlePreferencesReader } from "../../persistence/tenant-preferences";
+import type { TelemetryPayloadMode } from "../../console/settings/contracts";
 import type { ProxyRequestOutcome, ProxyRequestState } from "../request/state";
 import { finalizeRequestTelemetry } from "../middleware/error-lifecycle";
 import { log } from "../../observability/logger";
@@ -36,17 +37,26 @@ export function clearConsoleSettingsCacheForTests(): void {
 }
 
 /**
- * Settings-gated payload capture switch. Metadata is the default; tenants must
- * explicitly opt into bounded body capture through Settings → Privacy. Reads
- * go through the shared revision-keyed preferences cache, fail-closed on error.
+ * Settings-gated payload capture mode. Request-event metadata is always
+ * retained; tenants opt into drawer capture through Settings → Privacy:
+ * `metadata` keeps only the Proxy→Provider request line, `bounded` keeps
+ * redacted bodies for the short payload TTL. Fail-closed on error.
  */
-async function isPayloadCaptureEnabled(db: CartethyiaDatabase, tenantId: string | null): Promise<boolean> {
-  if (!tenantId) return false;
+async function resolvePayloadCaptureMode(
+  db: CartethyiaDatabase,
+  tenantId: string | null,
+): Promise<TelemetryPayloadMode> {
+  if (!tenantId) return "none";
   try {
     const prefs = await preferencesReaderFor(db).readPreferences(tenantId);
-    return prefs?.telemetryPayloads === "bounded";
+    const mode = prefs?.telemetryPayloads;
+    if (mode === "bounded" || mode === "metadata" || mode === "none") return mode;
+    // Unset preferences default to metadata (Proxy→Provider request line).
+    return "metadata";
   } catch {
-    return false;
+    // Preference read failure must not invent body capture; metadata is the
+    // safe default that still matches Settings → Privacy.
+    return "metadata";
   }
 }
 
@@ -144,6 +154,27 @@ function selectCapturedHeaders(init?: RequestInit): Record<string, string> | und
   return Object.keys(selected).length === 0 ? undefined : selected;
 }
 
+/**
+ * Keeps the Proxy→Provider request line (method, URL, allowlisted headers) and
+ * drops the body. Used by the `metadata` capture mode so operators can inspect
+ * framing without retaining prompt/response content.
+ */
+export function providerRequestMetadataOnly(request: unknown): unknown {
+  if (typeof request !== "object" || request === null) return null;
+  const record = request as Record<string, unknown>;
+  const metadata: Record<string, unknown> = {};
+  if (typeof record["method"] === "string") metadata["method"] = record["method"];
+  if (typeof record["url"] === "string") metadata["url"] = record["url"];
+  if (
+    typeof record["headers"] === "object" &&
+    record["headers"] !== null &&
+    !Array.isArray(record["headers"])
+  ) {
+    metadata["headers"] = record["headers"];
+  }
+  return Object.keys(metadata).length === 0 ? null : metadata;
+}
+
 /** Wraps a validated outbound fetch to tee the provider request/response. */
 export function captureProviderExchange(
   inner: ValidatedOutboundFetch,
@@ -207,7 +238,22 @@ function captureTerminalPayload(
   if (!tenantId) return;
   void (async () => {
     try {
-      if (!(await isPayloadCaptureEnabled(db, tenantId))) return;
+      const mode = await resolvePayloadCaptureMode(db, tenantId);
+      if (mode === "none") return;
+      if (mode === "metadata") {
+        const providerRequest = providerRequestMetadataOnly(providerCapture?.request ?? null);
+        if (providerRequest === null) return;
+        await new TelemetryPayloadCapture(db).capture({
+          tenantId,
+          requestId,
+          requestBody: null,
+          responseBody: null,
+          providerRequestBody: providerRequest,
+          scope: "tenant",
+          tenantOptIn: true,
+        });
+        return;
+      }
       const providerRequest = providerCapture?.request ?? null;
       const providerResponse = await resolvedProviderResponse(providerCapture);
       await new TelemetryPayloadCapture(db).capture({

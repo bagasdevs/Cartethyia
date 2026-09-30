@@ -7,6 +7,8 @@ import { CLIENT_ROUTERS, TENANT_KEY_SCOPES, type ApiKeyResponse } from "../../sr
 
 const shareRecord: ApiKeyResponse = {
   id: "parent-id", label: "Team share", keyMode: "share", scopes: [], createdAt: "2026-09-01T00:00:00.000Z", tokensConsumed: 0,
+  sharePopupMode: "donation",
+  sharePopupImageUrl: "https://img.example/donate.webp",
 };
 function render(mode: "create" | "edit", record: ApiKeyResponse | null): string {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -75,6 +77,19 @@ describe("API key mode form", () => {
     expect(markup).toContain('aria-checked="true"');
   });
 
+  test("shows the optional popup editor on create and edit with three modes", () => {
+    const popupRecord: ApiKeyResponse = {
+      ...shareRecord,
+      sharePopupMode: "donation",
+      sharePopupImageUrl: "https://img.example/donate.webp",
+    };
+    const createMarkup = render("create", null);
+    const editMarkup = render("edit", popupRecord);
+    expect(createMarkup).toContain("Attach image popup");
+    expect(createMarkup).toContain("Donation");
+    expect(createMarkup).toContain("Information");
+    expect(editMarkup).toContain("https://img.example/donate.webp");
+  });
   test("renders descriptive router and scope switches without provider allowlist", () => {
     const markup = render("create", null);
     expect(markup).toContain("Blocked client routers");

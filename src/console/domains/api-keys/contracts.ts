@@ -41,6 +41,12 @@ export interface CreateApiKeyRequest {
   notesTitle?: string;
   notesSubtitle?: string;
   notesBody?: string;
+  sharePopupMode?: "donation" | "information" | null;
+  sharePopupImageUrl?: string;
+  sharePopupTitle?: string;
+  sharePopupBody?: string;
+  sharePopupActionLabel?: string;
+  sharePopupActionUrl?: string;
 }
 
 /** Public key representation; it never contains a secret, hash, or IP-key digest. */
@@ -63,6 +69,12 @@ export interface ApiKeyResponse {
   readonly notesTitle?: string;
   readonly notesSubtitle?: string;
   readonly notesBody?: string;
+  readonly sharePopupMode?: "donation" | "information";
+  readonly sharePopupImageUrl?: string;
+  readonly sharePopupTitle?: string;
+  readonly sharePopupBody?: string;
+  readonly sharePopupActionLabel?: string;
+  readonly sharePopupActionUrl?: string;
   readonly createdAt: string;
   readonly revokedAt?: string;
   readonly tokensConsumed: number;
@@ -147,6 +159,21 @@ export function finitePositive(value: number | null | undefined, name: string): 
   }
 }
 
+/** Accepts HTTPS image URLs and HTTPS/mailto action URLs, rejecting unsafe schemes and credentials. */
+function validatePopupUrl(value: string, field: string, allowMailto: boolean): void {
+  try {
+    const url = new URL(value);
+    const schemeAllowed = url.protocol === "https:" || (allowMailto && url.protocol === "mailto:");
+    if (!schemeAllowed || url.username !== "" || url.password !== "") throw new Error("invalid");
+  } catch {
+    throw new ConsoleDomainError(
+      "invalid_share_popup",
+      400,
+      `${field} must be a valid HTTPS URL${allowMailto ? " or mailto link" : ""}`,
+    );
+  }
+}
+
 /** Validates scopes and quota fields before persistence. */
 export function validateApiKeyRequest(request: CreateApiKeyRequest): readonly AccessScope[] {
   const keyMode = request.keyMode ?? "personal";
@@ -167,6 +194,21 @@ export function validateApiKeyRequest(request: CreateApiKeyRequest): readonly Ac
   finitePositive(request.monthlyTokenLimit, "monthlyTokenLimit");
   finitePositive(request.lifetimeTokenBudget, "lifetimeTokenBudget");
   finitePositive(request.maxConcurrentRequests, "maxConcurrentRequests");
+  if (request.sharePopupImageUrl?.trim()) {
+    validatePopupUrl(request.sharePopupImageUrl.trim(), "sharePopupImageUrl", false);
+  }
+  if (request.sharePopupActionUrl?.trim()) {
+    validatePopupUrl(request.sharePopupActionUrl.trim(), "sharePopupActionUrl", true);
+  }
+  if (request.sharePopupTitle != null && request.sharePopupTitle.length > 120) {
+    throw new ConsoleDomainError("invalid_share_popup", 400, "Share popup title is too long");
+  }
+  if (request.sharePopupBody != null && request.sharePopupBody.length > 1200) {
+    throw new ConsoleDomainError("invalid_share_popup", 400, "Share popup body is too long");
+  }
+  if (request.sharePopupActionLabel != null && request.sharePopupActionLabel.length > 40) {
+    throw new ConsoleDomainError("invalid_share_popup", 400, "Share popup action label is too long");
+  }
   if (
     request.modelPrefix !== undefined &&
     (typeof request.modelPrefix !== "string" || request.modelPrefix.trim().length === 0)
@@ -223,6 +265,12 @@ export function sanitizeApiKeyResponse(record: ApiKeyRecord): ApiKeyResponse {
     ...(record.notesTitle === undefined ? {} : { notesTitle: record.notesTitle }),
     ...(record.notesSubtitle === undefined ? {} : { notesSubtitle: record.notesSubtitle }),
     ...(record.notesBody === undefined ? {} : { notesBody: record.notesBody }),
+    ...(record.sharePopupMode === undefined ? {} : { sharePopupMode: record.sharePopupMode }),
+    ...(record.sharePopupImageUrl === undefined ? {} : { sharePopupImageUrl: record.sharePopupImageUrl }),
+    ...(record.sharePopupTitle === undefined ? {} : { sharePopupTitle: record.sharePopupTitle }),
+    ...(record.sharePopupBody === undefined ? {} : { sharePopupBody: record.sharePopupBody }),
+    ...(record.sharePopupActionLabel === undefined ? {} : { sharePopupActionLabel: record.sharePopupActionLabel }),
+    ...(record.sharePopupActionUrl === undefined ? {} : { sharePopupActionUrl: record.sharePopupActionUrl }),
     ...(record.requestsPerMinute === undefined ? {} : { requestsPerMinute: record.requestsPerMinute }),
     ...(record.dailyTokenLimit === undefined ? {} : { dailyTokenLimit: record.dailyTokenLimit }),
     ...(record.monthlyTokenLimit === undefined ? {} : { monthlyTokenLimit: record.monthlyTokenLimit }),

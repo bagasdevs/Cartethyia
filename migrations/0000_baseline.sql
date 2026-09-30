@@ -210,6 +210,12 @@ CREATE TABLE "api_keys" (
   "notes_title" text,
   "notes_subtitle" text,
   "notes_body" text,
+  "share_popup_mode" text,
+  "share_popup_image_url" text,
+  "share_popup_title" text,
+  "share_popup_body" text,
+  "share_popup_action_label" text,
+  "share_popup_action_url" text,
   CONSTRAINT "api_keys_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE cascade,
   CONSTRAINT "api_keys_parent_key_id_api_keys_id_fk" FOREIGN KEY ("parent_key_id") REFERENCES "api_keys"("id") ON DELETE cascade,
   CONSTRAINT "api_keys_mode_shape_check" CHECK (
@@ -361,8 +367,17 @@ CREATE TABLE "telemetry_payloads" (
   "request_id" uuid,
   "captured_at" timestamptz DEFAULT now() NOT NULL,
   "expires_at" timestamptz NOT NULL,
-  "request_body" jsonb,
-  CONSTRAINT "telemetry_payloads_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE cascade
+  "storage" text NOT NULL,
+  "file" text NOT NULL,
+  "offset" integer NOT NULL,
+  "length" integer NOT NULL,
+  "checksum" text NOT NULL,
+  "version" integer NOT NULL,
+  CONSTRAINT "telemetry_payloads_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE cascade,
+  CONSTRAINT "telemetry_payloads_storage_check" CHECK ("storage" = 'jsonb-file'),
+  CONSTRAINT "telemetry_payloads_version_check" CHECK ("version" = 1),
+  CONSTRAINT "telemetry_payloads_offset_check" CHECK ("offset" >= 0),
+  CONSTRAINT "telemetry_payloads_length_check" CHECK ("length" > 0)
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX "api_keys_key_hash_idx" ON "api_keys" USING btree ("key_hash");

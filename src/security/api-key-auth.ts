@@ -264,8 +264,9 @@ export interface ResolvedApiKey {
   readonly scopes: readonly AccessScope[];
   readonly snapshot: ApiKeyAuthorizationSnapshot;
   readonly modelPrefix?: string;
+  /** Share-template id whose remote CLI mappings are inherited by this child. */
+  readonly cliMappingOwnerId?: string;
 }
-
 /** Extracts exactly one supported credential source, preserving public auth statuses. */
 export function requestToken(headers: Headers | Record<string, string>): string {
   const get = (name: string): string | null =>
@@ -352,8 +353,8 @@ export async function resolveApiKeyAuthorization(
     scopes,
     snapshot,
     ...(policy.modelPrefix ? { modelPrefix: policy.modelPrefix } : {}),
+    ...(parent?.keyMode === "share" ? { cliMappingOwnerId: parent.id } : {}),
   };
-  // Populate cache and reverse index.
   authCache.set(hash, { at: Date.now(), value });
   const hashes = authCacheByKeyId.get(value.id) ?? new Set<string>();
   hashes.add(hash);

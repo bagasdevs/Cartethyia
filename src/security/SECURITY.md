@@ -137,6 +137,10 @@ by owner summary or activity endpoints. Issued and request IPs are masked unless
 the tenant explicitly enables full IP display; metadata endpoints do not expose
 request or response payloads.
 
+For request routing, a shared child also uses the share template's ID as the
+CLI mapping owner; personal keys continue to use their own ID. The mapping still
+requires the inherited `routing:cli_mapping` scope and matching CLI User-Agent.
+
 ## Shared primitives
 
 - `access-control.ts`: closed `AccessScope` (`routing:invoke`,

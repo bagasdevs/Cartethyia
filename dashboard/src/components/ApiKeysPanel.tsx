@@ -265,7 +265,7 @@ export function ApiKeysPanel(): ReactNode {
         open={editTarget !== null}
         onClose={() => setEditTarget(null)}
         title="Edit API Key"
-        description="Update the key's model access, permissions, limits, and share notes."
+        description="Update the key's model access, permissions, limits, share notes, and optional public popup."
         width={760}
       >
         <ApiKeyForm

@@ -80,7 +80,7 @@ export function dashboardContentSecurityPolicy(html: string): string {
     `script-src 'self'${hashes.length > 0 ? ` ${hashes.join(" ")}` : ""}`,
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
-    `img-src 'self' data: blob: ${BADGE_IMAGE_ORIGIN}`,
+    "img-src 'self' data: blob: https: " + BADGE_IMAGE_ORIGIN,
     "connect-src 'self'",
     "object-src 'none'",
     "base-uri 'self'",

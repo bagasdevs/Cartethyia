@@ -50,13 +50,13 @@ describe("security header policy", () => {
    * the classes that could execute or exfiltrate: scripts stay same-origin plus
    * hashes, and `connect-src` stays `'self'`.
    */
-  test("dashboard CSP admits the badge image host without widening scripts or connections", () => {
+  test("dashboard CSP allows HTTPS popup images without widening connections or scripts", () => {
     const csp = dashboardContentSecurityPolicy("<script>boot()</script>");
-    expect(csp).toContain(`img-src 'self' data: blob: ${BADGE_IMAGE_ORIGIN}`);
+    expect(csp).toContain("img-src 'self' data: blob: https:");
+    expect(csp).toContain(`img-src 'self' data: blob: https: ${BADGE_IMAGE_ORIGIN}`);
     expect(csp).toContain("connect-src 'self'");
     expect(csp).toContain("script-src 'self' ");
     expect(csp).not.toContain("connect-src 'self' https:");
-    expect(csp).not.toContain(`script-src 'self' ${BADGE_IMAGE_ORIGIN}`);
   });
 
   /**

@@ -480,6 +480,12 @@ export const apiKeys = pgTable(
     notesTitle: text("notes_title"),
     notesSubtitle: text("notes_subtitle"),
     notesBody: text("notes_body"),
+    sharePopupMode: text("share_popup_mode").$type<"donation" | "information">(),
+    sharePopupImageUrl: text("share_popup_image_url"),
+    sharePopupTitle: text("share_popup_title"),
+    sharePopupBody: text("share_popup_body"),
+    sharePopupActionLabel: text("share_popup_action_label"),
+    sharePopupActionUrl: text("share_popup_action_url"),
     requestsPerMinute: integer("requests_per_minute"),
     dailyTokenLimit: bigint("daily_token_limit", { mode: "number" }),
     monthlyTokenLimit: bigint("monthly_token_limit", { mode: "number" }),
@@ -681,7 +687,13 @@ export interface ConsoleSettingsPreferences {
   /** Normalizes provider-native thinking config for non-user final turns. */
   thinkingNormalizationEnabled?: boolean;
   responsesReasoningSummary?: "auto" | "concise" | "detailed";
-  telemetryPayloads?: "bounded" | "none";
+  /**
+   * Payload capture mode (default `metadata` when unset):
+   * - `metadata` — Proxy→Provider method + allowlisted headers only
+   * - `bounded` — full redacted bodies for the short payload TTL
+   * - `none` — no drawer capture (request metadata events still retained)
+   */
+  telemetryPayloads?: "bounded" | "metadata" | "none";
   privacyMode?: "masked" | "full";
 }
 
@@ -867,16 +879,26 @@ export const telemetryPayloads = pgTable(
     capturedAt: timestamp("captured_at", { withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     /**
-     * Holds `{ _payload_ref }` pointing at the frame file that carries the
-     * captured bodies. The bodies themselves are never stored in a column —
-     * this row is only the index into the frame store.
+     * Typed index into the on-disk frame store. Prompt/response bodies live
+     * only in the frame file these columns name — never in Postgres. The
+     * previous `request_body jsonb` column is gone so a body cannot be
+     * written here by accident.
      */
-    requestBody: jsonb("request_body"),
+    storage: text("storage").notNull(),
+    file: text("file").notNull(),
+    offset: integer("offset").notNull(),
+    length: integer("length").notNull(),
+    checksum: text("checksum").notNull(),
+    version: integer("version").notNull(),
   },
   (table) => [
     index("telemetry_payloads_request_id_idx").on(table.requestId),
     index("telemetry_payloads_tenant_request_idx").on(table.tenantId, table.requestId),
     index("telemetry_payloads_expires_idx").on(table.expiresAt),
+    check("telemetry_payloads_storage_check", sql`${table.storage} = 'jsonb-file'`),
+    check("telemetry_payloads_version_check", sql`${table.version} = 1`),
+    check("telemetry_payloads_offset_check", sql`${table.offset} >= 0`),
+    check("telemetry_payloads_length_check", sql`${table.length} > 0`),
   ],
 );
 

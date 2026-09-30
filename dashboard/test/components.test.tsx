@@ -47,7 +47,7 @@ describe("dashboard components", () => {
       redisModeActual: "normal",
       tenantConcurrencyLimit: null,
       responsesReasoningSummary: "detailed",
-      telemetryPayloads: "bounded",
+      telemetryPayloads: "metadata",
       privacyMode: "masked",
       updatedAt: "2026-09-04T00:00:00.000Z",
     });
@@ -64,6 +64,14 @@ describe("dashboard components", () => {
     // advertise a different window.
     expect(markup).toContain("pruned after 15 minutes");
     expect(markup).toContain("deleted automatically after 15 minutes");
+    // Closed Radix selects only render the selected label; the helper copy is
+    // what documents the metadata mode when Bodies is the current value.
+    expect(markup).toContain(
+      "Metadata — Proxy→Provider method + headers (default), pruned after 15 minutes",
+    );
+    expect(markup).toContain(
+      "Default drawer capture is metadata-only",
+    );
     expect(markup).not.toContain("1 hour");
     expect(markup).not.toContain("Runtime Preferences");
     expect(markup).not.toContain("Redis mode");

@@ -6,9 +6,11 @@ import { resolveRedisMode } from "../../persistence/readiness";
 import { bumpSettingsRevision } from "../../persistence/tenant-preferences";
 import {
   RESPONSES_REASONING_SUMMARIES,
+  TELEMETRY_PAYLOAD_MODES,
   type ResponsesReasoningSummary,
   type RuntimeSettingsResponse,
   type RuntimeSettingsStore,
+  type TelemetryPayloadMode,
   type UpdateRuntimeSettingsRequest,
 } from "./contracts";
 
@@ -18,6 +20,18 @@ function isResponsesReasoningSummary(
   return (
     typeof value === "string" && (RESPONSES_REASONING_SUMMARIES as readonly string[]).includes(value)
   );
+}
+
+function normalizeTelemetryPayloadMode(value: unknown): TelemetryPayloadMode {
+  if (
+    typeof value === "string" &&
+    (TELEMETRY_PAYLOAD_MODES as readonly string[]).includes(value)
+  ) {
+    return value as TelemetryPayloadMode;
+  }
+  // Unset / legacy preference bags default to metadata: Proxy→Provider
+  // request line only, never bodies. Operators still opt into `bounded`.
+  return "metadata";
 }
 
 function mapRuntimeSettingsRow(row: typeof consoleSettings.$inferSelect | undefined): RuntimeSettingsResponse {
@@ -30,7 +44,7 @@ function mapRuntimeSettingsRow(row: typeof consoleSettings.$inferSelect | undefi
     responsesReasoningSummary: isResponsesReasoningSummary(prefs.responsesReasoningSummary)
       ? prefs.responsesReasoningSummary
       : "detailed",
-    telemetryPayloads: prefs.telemetryPayloads === "bounded" ? "bounded" : "none",
+    telemetryPayloads: normalizeTelemetryPayloadMode(prefs.telemetryPayloads),
     privacyMode: prefs.privacyMode === "full" ? "full" : "masked",
     updatedAt,
   };

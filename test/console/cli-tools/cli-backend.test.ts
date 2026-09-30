@@ -153,7 +153,7 @@ const readOnly: AccessDecision = {
   scopes: ["dashboard:read"],
 };
 
-function createService(): CliToolService {
+function createService(onApply?: (mappingOwnerId: string) => void): CliToolService {
   return {
     getRegistry: () => [
       {
@@ -221,7 +221,8 @@ function createService(): CliToolService {
       }
       return { ...input, apiKey: "resolved-secret" };
     },
-    applyConfig: async (_tenantId: string, toolId: string, _apiKeyId: string, input: ApplyInput & { mode?: string }) => {
+    applyConfig: async (_tenantId: string, toolId: string, mappingOwnerId: string, input: ApplyInput & { mode?: string }) => {
+      onApply?.(mappingOwnerId);
       if (toolId !== "claude") return null;
       const mode = input.mode ?? "both";
       const wroteFile = mode !== "remote";
@@ -350,6 +351,31 @@ describe("createCliToolsRoutes", () => {
 
     const file = await app(readWrite).handle(body("file"));
     expect(await file.json()).toMatchObject({ outcome: "file", savedRemoteRoute: false });
+  });
+  test("applies remote mappings under the selected share-template owner", async () => {
+    let savedOwner = "";
+    const appWithOwner = createCliToolsRoutes({
+      service: createService((owner) => {
+        savedOwner = owner;
+      }),
+      accessResolver: () => readWrite,
+    });
+    const response = await appWithOwner.handle(
+      new Request("http://localhost/cli-tools/claude/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          endpoint: "http://localhost:12800",
+          keyId: "personal-credential",
+          mappingOwnerId: "share-template",
+          models: [],
+          mode: "remote",
+          mapping: { enabled: true, mappings: [] },
+        }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(savedOwner).toBe("share-template");
   });
 
   test("apply requires write scope, download only read", async () => {

@@ -141,7 +141,7 @@ ciphertext.
   `insertPayload(row)`, `deleteExpiredPayloads()`, and `pruneTelemetry(before)`
   retain the existing payload policy. Metadata retention is configured by
   `CARTETHYIA_TELEMETRY_RETENTION_DAYS` (default 30 days); payload retention is
-  15 minutes. `telemetryPayloads` is tenant-gated and off by default
+  15 minutes. `telemetryPayloads` is tenant-gated and defaults to metadata-only
   (`bounded` is an explicit debugging opt-in); rows hold checksummed frame
   references, not bodies (see `observability/OBSERVABILITY.md`).
 - `share-store.ts`: `hashShareToken()` (SHA-256); `DrizzleShareLinkStore` —
@@ -157,6 +157,7 @@ ciphertext.
   `findActiveByHash()`. Parent revoke or conversion to personal mode revokes
   children and deactivates links transactionally; hashless templates cannot
   authenticate.
+- `api_keys.share_popup_*` stores optional donation/information popup copy and external URL metadata. `0015_api_key_share_popup.sql` adds the nullable fields and constrains mode; image bytes are referenced by HTTPS URL and never uploaded or stored by the gateway.
 - `tenant-scope.ts`: `globalOrOwnedBy(column, tenantId)` (NULL rows are
   global; a null requester is a platform identity and matches globals only),
   `ownedByOnly()`, and `resolveTenantOverride(tenantRow, globalRow, default)`
@@ -193,6 +194,7 @@ ciphertext.
   `test/contracts/migration-integrity.contract.test.ts` asserts the baseline
   carries the folded-in shape, and `test/integration/isolated-db.test.ts`
   compares a freshly migrated database against `schema.ts` column by column.
-- Telemetry tables stay metadata-only; bodies are written to the append-only
-  `.jsonb` frame files and the `telemetry_payloads` row keeps only a
-  checksummed file reference — opt-in, redacted, and TTL-expired.
+- Telemetry event tables stay metadata-only; captured drawer content is written
+  to append-only `.jsonb` frame files and `telemetry_payloads` stores only typed
+  file-reference columns (`storage`/`file`/`offset`/`length`/`checksum`/`version`)
+  — never a jsonb body — opt-in, redacted, and TTL-expired.

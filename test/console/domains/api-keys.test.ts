@@ -165,6 +165,63 @@ describe("api-key operations", () => {
     // The public projection must never leak credential material.
     expect(JSON.stringify(created)).not.toContain("keyHash");
   });
+  test("persists the donation popup config and rejects unsafe popup URLs", async () => {
+    const { store, records } = fakeKeyStore();
+    const operations = createApiKeyOperations({ store, accessResolver: () => writer, admissionService: fakeAdmission() });
+    const created = await operations.createKey(writer, {
+      keyMode: "share",
+      sharePopupMode: "donation",
+      sharePopupImageUrl: "https://images.example/donate.webp",
+      sharePopupTitle: "Keep us online",
+      sharePopupBody: "Support hosting.",
+      sharePopupActionLabel: "Donate",
+      sharePopupActionUrl: "mailto:hello@example.test",
+    });
+    expect(records.get(created.id)).toMatchObject({
+      sharePopupMode: "donation",
+      sharePopupImageUrl: "https://images.example/donate.webp",
+      sharePopupTitle: "Keep us online",
+      sharePopupBody: "Support hosting.",
+      sharePopupActionLabel: "Donate",
+      sharePopupActionUrl: "mailto:hello@example.test",
+    });
+    await expect(operations.createKey(writer, {
+      keyMode: "share",
+      sharePopupMode: "information",
+      sharePopupImageUrl: "javascript:alert(1)",
+    })).rejects.toMatchObject({ code: "invalid_share_popup" });
+  });
+  test("accepts popup emails and rejects credential-bearing URLs", async () => {
+    const { store } = fakeKeyStore();
+    const operations = createApiKeyOperations({ store, accessResolver: () => writer, admissionService: fakeAdmission() });
+    const valid = await operations.createKey(writer, {
+      keyMode: "share",
+      sharePopupMode: "donation",
+      sharePopupActionUrl: "mailto:hello@example.test",
+    });
+    expect(valid.sharePopupActionUrl).toBe("mailto:hello@example.test");
+    await expect(operations.createKey(writer, {
+      keyMode: "share",
+      sharePopupMode: "information",
+      sharePopupImageUrl: "https://user:password@images.example/popup.webp",
+    })).rejects.toMatchObject({ code: "invalid_share_popup" });
+  });
+  test("updates and can disable a share popup", async () => {
+    const { store, records } = fakeKeyStore();
+    const operations = createApiKeyOperations({ store, accessResolver: () => writer, admissionService: fakeAdmission() });
+    const created = await operations.createKey(writer, {
+      keyMode: "share",
+      sharePopupMode: "information",
+      sharePopupTitle: "About this key",
+    });
+    const updated = await operations.updateKey(writer, created.id, {
+      sharePopupMode: null,
+      sharePopupTitle: "",
+    });
+    expect(records.get(created.id)?.sharePopupMode).toBeUndefined();
+    expect(records.get(created.id)?.sharePopupTitle).toBeUndefined();
+    expect(updated.sharePopupMode).toBeUndefined();
+  });
 
   test("changing a personal key prefix rotates and returns a new secret once", async () => {
     const { store, records } = fakeKeyStore();

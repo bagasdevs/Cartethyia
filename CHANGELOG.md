@@ -5,6 +5,26 @@
 > All changes below are pre-release. Cartethyia has not been tagged or
 > released; this document reflects the current production codebase architecture and capabilities.
 
+### Shared-key issuance requires a recipient name; Claude mappings support share profiles
+
+The public enrollment endpoint now rejects missing or blank `nameHint` values before it creates a child key. Claude CLI mapping profiles can be saved on a top-level share template and are resolved for its children at request time; the CLI config still uses a separately selected personal credential. Existing `routing:cli_mapping` scope and Claude User-Agent checks remain required.
+
+### Payload capture is typed on disk and gains a metadata-only mode
+
+`telemetry_payloads` no longer has a jsonb body column. Captured content lives
+only in on-disk `.jsonb` frames; the Postgres row stores typed reference
+columns (`storage`, `file`, `offset`, `length`, `checksum`, `version`). Existing
+index rows are truncated on upgrade (`0014_telemetry_payload_typed_ref.sql`);
+frame files are left for TTL prune.
+
+Settings → Privacy now has three payload modes: `metadata` (default;
+Proxy→Provider method + allowlisted headers only), `bounded` (full redacted
+bodies), and `none` (drawer capture off). Both capture modes still prune after
+the 15-minute payload TTL.
+### Public share pages support owner-configured donation and information popups
+
+API-key create/edit can configure a popup mode, HTTPS image URL, title, message, and optional HTTPS/mailto action. Public enrollment and handoff pages show a button under Base URL; the responsive dialog opens only on visitor action. The new nullable key fields are added to fresh installs and upgraded by `0015_api_key_share_popup.sql`.
+
 ### Reasoning effort is recorded on every surface, and the Usage table names a provider
 
 The Messages surface read effort only from Anthropic's own `thinking` and

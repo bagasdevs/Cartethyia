@@ -1,7 +1,7 @@
 import { redactTelemetryValue } from "./redaction";
 import type { CartethyiaDatabase } from "../persistence/postgres";
 import { DrizzleTelemetryStore } from "../persistence/telemetry-store";
-import { prunePayloadFrames, writePayloadFrame, type PayloadFileReference } from "./payload-store";
+import { prunePayloadFrames, writePayloadFrame } from "./payload-store";
 export type CaptureScope = "tenant" | "debug_session" | "operator_flag";
 
 export interface PayloadCaptureInput {
@@ -122,14 +122,19 @@ export class TelemetryPayloadCapture {
     }
     const record = buildPayloadRecord(input);
     const reference = await writePayloadFrame(record, record.expires_at);
-    // The row stores only the reference; every captured body lives in the frame
-    // file it points at. `request_body` is the reference column by contract.
+    // Typed columns only — bodies live in the frame file. The schema has no
+    // jsonb body column, so a body cannot be written to Postgres here.
     return this.store.insertPayload({
       tenantId: input.tenantId,
       requestId: input.requestId ?? null,
       capturedAt: record.captured_at,
       expiresAt: record.expires_at,
-      requestBody: { _payload_ref: reference as PayloadFileReference },
+      storage: reference.storage,
+      file: reference.file,
+      offset: reference.offset,
+      length: reference.length,
+      checksum: reference.checksum,
+      version: reference.version,
     });
   }
 

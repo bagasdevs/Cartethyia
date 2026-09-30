@@ -20,6 +20,7 @@ const data: ShareEnrollmentData = {
   name: "Team Access", keyPrefix: "ctk", canIssue: true, alreadyIssued: false,
   dailyLimit: 50_000, monthlyLimit: null, oneTimeLimit: null, requestsPerMinute: 20, maxConcurrentRequests: 3,
   modelAllowlist: ["gpt-5"], modelDenylist: null, modelPrefix: "gpt-", notes: { title: null, subtitle: "Shared access", body: "Use responsibly" },
+  sharePopup: { mode: null, imageUrl: null, title: null, body: null, actionLabel: null, actionUrl: null },
   expiresAt: null,
 };
 
@@ -28,6 +29,7 @@ const handoff: ShareHandoffData = {
   name: "Personal key", keyPrefix: "rk_", key: "rk_handed_over_secret",
   dailyLimit: null, monthlyLimit: null, oneTimeLimit: null, requestsPerMinute: null, maxConcurrentRequests: null,
   modelAllowlist: ["gpt-5"], modelDenylist: null, modelPrefix: null, notes: { title: null, subtitle: null, body: null },
+  sharePopup: { mode: null, imageUrl: null, title: null, body: null, actionLabel: null, actionUrl: null },
   expiresAt: null,
 };
 
@@ -46,6 +48,36 @@ describe("public share enrollment page", () => {
     expect(markup).toContain("https://gateway.example/v1");
     expect(markup).toContain("Base URL");
     expect(markup).toContain("Generate API Key");
+  });
+  test("requires a display name before enabling shared key issuance", () => {
+    shareState = { data, error: null, loading: false };
+    const markup = render();
+    expect(markup).toContain("required");
+    expect(markup).toContain("disabled=\"\"");
+    expect(markup).toContain("Enter your name to generate a personal key.");
+  });
+  test("renders an image popup trigger and customizable donation content", () => {
+    shareState = {
+      data: {
+        ...data,
+        sharePopup: {
+          mode: "donation",
+          imageUrl: "https://images.example/donate.webp",
+          title: "Keep it online",
+          body: "Your support covers hosting.",
+          actionLabel: "Donate",
+          actionUrl: "https://pay.example/donate",
+        },
+      },
+      error: null,
+      loading: false,
+    };
+    const markup = render();
+    expect(markup).toContain("Open support popup");
+    expect(markup).toContain("Support this project");
+    expect(markup).toContain("Keep it online");
+    expect(markup).toContain("share-support-trigger");
+    expect(markup).not.toContain("share-support-dialog");
   });
 
   test("shows the repository link beside Home, and drops the policy and prefix panels", () => {

@@ -11,8 +11,10 @@ story and manual chapter navigation stay in `landing.css`; Share's public HUD
 stays in `share.css`, without a decorative background and with the same
 `console-theme` preference as Console. Landing's GitHub badge sits immediately
 before All view and links the repository with live star and fork counts; the
-badge images come from an external host the dashboard CSP admits under `img-src`
-only. Chapter auto-scroll is disabled.
+badge images come from external hosts admitted only under `img-src`; share-popup
+images are HTTPS-only. `connect-src` remains same-origin, so the dashboard cannot
+call arbitrary third-party APIs. Chapter auto-scroll is disabled.
+- Public share links may include an owner-configured donation or information popup, click-opened from the Base URL card. `share.css` provides the responsive dialog layout for desktop and mobile.
 Production serves the built files from `dist/dashboard`.
 
 ## Test tree

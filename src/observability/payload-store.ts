@@ -32,18 +32,28 @@ export function isPayloadFileReference(value: unknown): value is PayloadFileRefe
 }
 
 /**
- * Payload rows store the file reference wrapped as `{ _payload_ref: ... }`
- * (see `TelemetryPayloadCapture.capture`) so the column can later hold either
- * a reference or an inline body. Unwraps both the wrapped and the bare shape;
- * returns undefined for inline bodies, so callers never leak raw ref JSON.
+ * Builds a frame reference from a `telemetry_payloads` row's typed columns.
+ * Returns undefined when any column is out of contract so callers treat a
+ * corrupt index row as "no payload" rather than path-traversing or reading
+ * the wrong bytes.
  */
-export function extractPayloadFileReference(value: unknown): PayloadFileReference | undefined {
-  if (isPayloadFileReference(value)) return value;
-  if (typeof value === "object" && value !== null && "_payload_ref" in value) {
-    const inner: unknown = (value as { readonly _payload_ref?: unknown })._payload_ref;
-    if (isPayloadFileReference(inner)) return inner;
-  }
-  return undefined;
+export function payloadReferenceFromRow(row: {
+  readonly storage: string;
+  readonly file: string;
+  readonly offset: number;
+  readonly length: number;
+  readonly checksum: string;
+  readonly version: number;
+}): PayloadFileReference | undefined {
+  const candidate = {
+    storage: row.storage,
+    file: row.file,
+    offset: row.offset,
+    length: row.length,
+    checksum: row.checksum,
+    version: row.version,
+  };
+  return isPayloadFileReference(candidate) ? candidate : undefined;
 }
 
 const FRAME_HEADER_BYTES = 4;

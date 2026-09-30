@@ -154,36 +154,41 @@ batched `insertEvents` -> scheduled retention prune:
 
 ## Payload capture
 
-Opt-in, redacted, bounded, TTL'd request/response capture for debugging:
+Opt-in, redacted, bounded, TTL'd capture for debugging:
 
-- Metadata in `telemetry_events` is always retained; payload bodies are off by
-  default (`telemetryPayloads: "none"`). A tenant may explicitly choose
-  `"bounded"` in Settings → Privacy for short-lived debugging capture.
+- Request-event metadata in `telemetry_events` is always retained; drawer
+  capture defaults to `"metadata"` (Proxy→Provider method + allowlisted
+  headers only). Settings → Privacy also offers `"bounded"` (full redacted
+  bodies for the short TTL) and `"none"` (drawer capture off).
 - `isCaptureAllowed` requires exactly one opt-in flag matching the scope
   (`tenant` / `debug_session` / `operator_flag`); two flags at once refuse
   capture. The terminal-attempt path is additionally settings-gated.
 - `buildPayloadRecord` redacts every body, drops bodies over 1 MB combined
   (replaced with a truncation marker), stamps a 15-minute expiry
   (`CARTETHYIA_TELEMETRY_PAYLOAD_RETENTION_MS`, clamped to 1 s..7 d), and links
-  the row to `telemetry_events.request_id`.
+  the row to `telemetry_events.request_id`. Metadata mode never passes bodies
+  into that builder — only the provider request line.
 - `payload-store.ts` persists frames as checksummed, length-prefixed JSON in
   append-only hourly `.jsonb` files (`CARTETHYIA_TELEMETRY_PAYLOAD_DIR`,
   1 MB max frame, `CARTETHYIA_TELEMETRY_PAYLOAD_FILE_MAX_BYTES` 64 MB max file
-  with rotation, serialized writers); the DB
-  row holds only a file reference. `cleanupExpired` (every 15 min via
-  `telemetry-payload-cleanup`) deletes expired rows in batches and then reclaims
-  whole files that hold no live frame. Files are **never rewritten**: a row
-  addresses its body by file + offset + length, so compacting in place would
-  shift the frames behind it and leave current rows reading the wrong bytes.
-  A file whose contents cannot be fully parsed is kept until its last write is
-  older than the retention window, when nothing it holds can still be live, and
-  one damaged file never aborts the pass over the rest. The file-store settings
-  remain active because this backing store is still live.
+  with rotation, serialized writers); the DB row holds typed file-reference
+  columns (`storage`/`file`/`offset`/`length`/`checksum`/`version`) — never a
+  jsonb body. `cleanupExpired` (every 15 min via `telemetry-payload-cleanup`)
+  deletes expired rows in batches and then reclaims whole files that hold no
+  live frame. Files are **never rewritten**: a row addresses its body by file +
+  offset + length, so compacting in place would shift the frames behind it and
+  leave current rows reading the wrong bytes. A file whose contents cannot be
+  fully parsed is kept until its last write is older than the retention window,
+  when nothing it holds can still be live, and one damaged file never aborts
+  the pass over the rest. The file-store settings remain active because this
+  backing store is still live.
 
 ## Rules / invariants
 
 - `telemetry_events` is metadata-only; prompt/response bodies are structurally
   excluded from the schema and must never be added there.
+- `telemetry_payloads` is a typed index into on-disk frames only — never a jsonb
+  body column.
 - Telemetry/logging paths never block or throw into requests: enqueue is
   non-blocking, drains are counted when dropped, ring subscribers and the
   outage logger are failure-isolated.

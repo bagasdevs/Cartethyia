@@ -88,4 +88,10 @@ describe("runtime settings operations", () => {
     const bad = { telemetryPayloads: "always" } as unknown as UpdateRuntimeSettingsRequest;
     await expect(factory.update(access, bad)).rejects.toMatchObject({ code: "invalid_request" });
   });
+
+  test("accepts the metadata capture mode", async () => {
+    const factory = createRuntimeSettingsOperations({ store: makeStore(), accessResolver: () => access });
+    const result = await factory.update(access, { telemetryPayloads: "metadata" });
+    expect(result.telemetryPayloads).toBe("metadata");
+  });
 });

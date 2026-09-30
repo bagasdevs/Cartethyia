@@ -1,5 +1,6 @@
-import { useEffect, useState, type ReactElement } from "react";
-import { Home, Moon, ShieldCheck, Sun } from "lucide-react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
+import { Home, Moon, ShieldCheck, Sun, X } from "lucide-react";
+import { useModalFocus } from "../../hooks/use-modal-focus";
 import { Button } from "../../components/ui/button";
 import { Card, CardBody } from "../../components/ui/card";
 import { EmptyState, ErrorState, LoadingState } from "../../components/ui/state";
@@ -50,6 +51,9 @@ export function SharePage(): ReactElement {
   const [issueBusy, setIssueBusy] = useState(false);
   const [issueError, setIssueError] = useState<string | null>(null);
   const [issueConflict, setIssueConflict] = useState(false);
+  const [sharePopupOpen, setSharePopupOpen] = useState(false);
+  const sharePopupRef = useRef<HTMLElement>(null);
+  useModalFocus({ open: sharePopupOpen, mounted: sharePopupOpen, panelRef: sharePopupRef, onClose: () => setSharePopupOpen(false) });
   // Dark is the default reading of the share HUD; the toggle beside Home flips
   // the same `console-theme` preference the console uses.
   const [theme, setTheme] = useState<ConsoleThemeChoice>(() => readConsoleTheme("dark"));
@@ -250,6 +254,22 @@ export function SharePage(): ReactElement {
                   />
                 </div>
                 <p>Point your SDK, Opencode, Claude Code, Droid, and any other CLI</p>
+                {data.sharePopup.mode ? (
+                  <button
+                    type="button"
+                    className="share-support-trigger"
+                    onClick={() => setSharePopupOpen(true)}
+                    aria-haspopup="dialog"
+                    aria-label={data.sharePopup.mode === "donation" ? "Open support popup" : "Open information popup"}
+                  >
+                    <span className="share-support-icon" aria-hidden="true">♡</span>
+                    <span>
+                      <strong>{data.sharePopup.mode === "donation" ? "Support this project" : "More information"}</strong>
+                      <small>{data.sharePopup.title || "A note from the link owner"}</small>
+                    </span>
+                    <span className="share-support-arrow" aria-hidden="true">↗</span>
+                  </button>
+                ) : null}
               </Card>
               <Card className="share-hud-card share-key-panel">
                 <h2 className="share-eyebrow">YOUR API KEY</h2>
@@ -312,20 +332,21 @@ export function SharePage(): ReactElement {
                           <input
                             type="text"
                             value={nameHint}
+                            required
                             maxLength={NAME_HINT_MAX_LENGTH}
-                            placeholder="e.g. budi"
-                            autoComplete="off"
+                            autoComplete="nickname"
                             onChange={(event) => setNameHint(event.target.value)}
                           />
                           <span className="share-name-hint">
                             Shown on your key (best kept to ~5 letters) — the gateway appends its own code.
                           </span>
                         </label>
+                        <p className="share-name-required">Enter your name to generate a personal key.</p>
                         <Button
                           variant="primary"
                           size="sm"
                           loading={issueBusy}
-                          disabled={issueBusy}
+                          disabled={issueBusy || !nameHint.trim()}
                           onClick={() => void issue()}
                         >
                           {issueBusy ? "Generating…" : "Generate API Key"}
@@ -346,6 +367,58 @@ export function SharePage(): ReactElement {
               </Card>
             </div>
 
+            {sharePopupOpen && data.sharePopup.mode ? (
+              <div
+                className="share-support-overlay"
+                role="presentation"
+                onClick={(event) => {
+                  if (event.target === event.currentTarget) setSharePopupOpen(false);
+                }}
+              >
+                <section
+                  ref={sharePopupRef}
+                  tabIndex={-1}
+                  className="share-support-dialog"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="share-support-title"
+                  aria-describedby="share-support-message"
+                >
+                  <button type="button" className="share-support-close" onClick={() => setSharePopupOpen(false)} aria-label="Close popup">
+                    <X size={18} aria-hidden="true" />
+                  </button>
+                  {data.sharePopup.imageUrl ? (
+                    <img className="share-support-image" src={data.sharePopup.imageUrl} alt="" referrerPolicy="no-referrer" />
+                  ) : (
+                    <div className="share-support-image-placeholder" aria-hidden="true">
+                      <span>{data.sharePopup.mode === "donation" ? "♡" : "✦"}</span>
+                    </div>
+                  )}
+                  <div className="share-support-content">
+                    <p className="share-eyebrow">{data.sharePopup.mode === "donation" ? "SUPPORT THIS PROJECT" : "A NOTE FOR YOU"}</p>
+                    <h2 id="share-support-title">{data.sharePopup.title || (data.sharePopup.mode === "donation" ? "Keep the gateway going" : "A little more context")}</h2>
+                    <p id="share-support-message" className="share-support-message">
+                      {data.sharePopup.body || (data.sharePopup.mode === "donation" ? "If this service has been useful, your support helps cover hosting and keep it available for everyone." : "Thanks for visiting this shared access page. Here is a little more information from its owner.")}
+                    </p>
+                    <div className="share-support-actions">
+                      {data.sharePopup.actionUrl ? (
+                        <a
+                          className="share-support-action"
+                          href={data.sharePopup.actionUrl}
+                          target={data.sharePopup.actionUrl.startsWith("https:") ? "_blank" : undefined}
+                          rel={data.sharePopup.actionUrl.startsWith("https:") ? "noopener noreferrer" : undefined}
+                        >
+                          {data.sharePopup.actionLabel || (data.sharePopup.mode === "donation" ? "Support the project" : "Learn more")}
+                        </a>
+                      ) : null}
+                      <button type="button" className="share-support-dismiss" onClick={() => setSharePopupOpen(false)}>
+                        Maybe later
+                      </button>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            ) : null}
             {data.notes.title || data.notes.subtitle || data.notes.body ? (
               <Card className="share-hud-card share-notes">
                 <h2 className="share-eyebrow">NOTES</h2>

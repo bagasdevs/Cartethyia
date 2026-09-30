@@ -141,6 +141,12 @@ export interface KeyFormInput {
   notesTitle?: string;
   notesSubtitle?: string;
   notesBody?: string;
+  sharePopupMode: "donation" | "information" | null;
+  sharePopupImageUrl: string;
+  sharePopupTitle: string;
+  sharePopupBody: string;
+  sharePopupActionLabel: string;
+  sharePopupActionUrl: string;
 }
 interface KeyFormProps {
   mode: "create" | "edit";
@@ -218,6 +224,12 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose }: KeyFormProps
     const b = (record as unknown as { notesBody?: string | null })?.notesBody;
     return b ?? "";
   });
+  const [sharePopupMode, setSharePopupMode] = useState<"donation" | "information" | null>(record?.sharePopupMode ?? null);
+  const [sharePopupImageUrl, setSharePopupImageUrl] = useState(record?.sharePopupImageUrl ?? "");
+  const [sharePopupTitle, setSharePopupTitle] = useState(record?.sharePopupTitle ?? "");
+  const [sharePopupBody, setSharePopupBody] = useState(record?.sharePopupBody ?? "");
+  const [sharePopupActionLabel, setSharePopupActionLabel] = useState(record?.sharePopupActionLabel ?? "");
+  const [sharePopupActionUrl, setSharePopupActionUrl] = useState(record?.sharePopupActionUrl ?? "");
   const [keyMode, setKeyMode] = useState<ApiKeyResponse["keyMode"]>(
     record?.keyMode ?? "personal",
   );
@@ -243,6 +255,12 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose }: KeyFormProps
       notesTitle: notesTitle.trim(),
       notesSubtitle: notesSubtitle.trim(),
       notesBody: notesBody.trim(),
+      sharePopupMode,
+      sharePopupImageUrl: sharePopupImageUrl.trim(),
+      sharePopupTitle: sharePopupTitle.trim(),
+      sharePopupBody: sharePopupBody.trim(),
+      sharePopupActionLabel: sharePopupActionLabel.trim(),
+      sharePopupActionUrl: sharePopupActionUrl.trim(),
     });
   };
   return (
@@ -463,6 +481,45 @@ export function ApiKeyForm({ mode, record, busy, onDone, onClose }: KeyFormProps
           placeholder="Free-form notes for the recipient"
           disabled={busy}
         />
+      </section>
+      <section className="api-key-share-popup-editor" aria-labelledby="share-popup-heading">
+        <div>
+          <h3 id="share-popup-heading" style={{ fontSize: "13px", fontWeight: 700, color: "var(--text-primary)" }}>
+            Attach image popup
+          </h3>
+          <p style={{ marginTop: "2px", fontSize: "11px", color: "var(--text-tertiary)" }}>
+            Add an optional donation or information card. Visitors open it from the Base URL card on your share page.
+          </p>
+        </div>
+        <label className="form-label" htmlFor="share-popup-mode">
+          Popup type
+          <select
+            id="share-popup-mode"
+            value={sharePopupMode ?? "off"}
+            onChange={(event) => setSharePopupMode(event.target.value === "off" ? null : event.target.value as "donation" | "information")}
+            disabled={busy}
+          >
+            <option value="off">Off</option>
+            <option value="donation">Donation</option>
+            <option value="information">Information</option>
+          </select>
+        </label>
+        {sharePopupMode ? (
+          <>
+            <Input label="Image URL" type="url" value={sharePopupImageUrl} onChange={(event) => setSharePopupImageUrl(event.target.value)} placeholder="https://…" disabled={busy} />
+            {sharePopupImageUrl.trim() ? (
+              <img className="api-key-popup-preview" src={sharePopupImageUrl} alt="Popup image preview" referrerPolicy="no-referrer" />
+            ) : null}
+            <Input label="Popup title" value={sharePopupTitle} onChange={(event) => setSharePopupTitle(event.target.value)} maxLength={120} placeholder={sharePopupMode === "donation" ? "Support this gateway" : "A note for visitors"} disabled={busy} />
+            <label className="form-label" htmlFor="share-popup-copy">
+              Message
+              <textarea id="share-popup-copy" value={sharePopupBody} onChange={(event) => setSharePopupBody(event.target.value)} maxLength={1200} rows={4} placeholder={sharePopupMode === "donation" ? "If this service helps you, consider supporting its upkeep…" : "Share useful details with visitors…"} disabled={busy} />
+            </label>
+            <Input label="Button label (optional)" value={sharePopupActionLabel} onChange={(event) => setSharePopupActionLabel(event.target.value)} maxLength={40} placeholder={sharePopupMode === "donation" ? "Support me" : "Learn more"} disabled={busy} />
+            <Input label="Button URL (optional)" type="url" value={sharePopupActionUrl} onChange={(event) => setSharePopupActionUrl(event.target.value)} placeholder="https://… or mailto:…" disabled={busy} />
+            <p className="api-key-popup-footnote">Only HTTPS images and HTTPS / mailto buttons are accepted. The popup is optional and opens only when a visitor clicks it.</p>
+          </>
+        ) : null}
       </section>
       <section
         style={{

@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { captureProviderExchange } from "../../../src/transport/dispatch/attempt-finalize";
+import {
+  captureProviderExchange,
+  providerRequestMetadataOnly,
+} from "../../../src/transport/dispatch/attempt-finalize";
 import type { ValidatedOutboundFetch } from "../../../src/providers/provider-registry";
 
 /** A fetch that records nothing and returns a minimal JSON response. */
@@ -114,5 +117,27 @@ describe("captureProviderExchange header capture", () => {
       "x-claude-code-session-id": "cc-1",
       "user-agent": "claude-cli/2.0.0",
     });
+  });
+});
+
+describe("providerRequestMetadataOnly", () => {
+  test("keeps method, url, and headers while dropping the body", () => {
+    expect(
+      providerRequestMetadataOnly({
+        method: "POST",
+        url: "https://example.test/v1/responses",
+        headers: { "user-agent": "claude-cli/2.0.0" },
+        body: { model: "secret-prompt" },
+      }),
+    ).toEqual({
+      method: "POST",
+      url: "https://example.test/v1/responses",
+      headers: { "user-agent": "claude-cli/2.0.0" },
+    });
+  });
+
+  test("returns null when nothing remains", () => {
+    expect(providerRequestMetadataOnly({ body: { model: "x" } })).toBeNull();
+    expect(providerRequestMetadataOnly(null)).toBeNull();
   });
 });

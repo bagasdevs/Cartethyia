@@ -169,6 +169,8 @@ export interface ApplyInput {
   readonly activeModel?: string;
   /** Subagent model (for tools that support it, e.g. Codex, OpenCode). */
   readonly subagentModel?: string;
+  /** API-key or share-template id that owns the remote mappings. */
+  readonly mappingOwnerId?: string;
   /** Harness-specific mappings persisted separately from native CLI config. */
   readonly mapping?: CliMappingInput;
   /** Enables [CC]'s bypass-permissions (YOLO) mode when explicitly selected. */

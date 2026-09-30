@@ -88,6 +88,12 @@ function shareRow(overrides: Partial<ShareApiKeyRow> = {}): ShareApiKeyRow {
     notesTitle: null,
     notesSubtitle: null,
     notesBody: null,
+    sharePopupMode: null,
+    sharePopupImageUrl: null,
+    sharePopupTitle: null,
+    sharePopupBody: null,
+    sharePopupActionLabel: null,
+    sharePopupActionUrl: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     expiresAt: null,
     ...overrides,
@@ -112,6 +118,12 @@ function handoffRow(overrides: Partial<ShareHandoffRow> = {}): ShareHandoffRow {
     notesTitle: null,
     notesSubtitle: null,
     notesBody: null,
+    sharePopupMode: null,
+    sharePopupImageUrl: null,
+    sharePopupTitle: null,
+    sharePopupBody: null,
+    sharePopupActionLabel: null,
+    sharePopupActionUrl: null,
     expiresAt: null,
     ...overrides,
   };
@@ -159,6 +171,14 @@ describe("public share router", () => {
       requestsPerMinute: 30,
       maxConcurrentRequests: 2,
       dailyLimit: 1000,
+    });
+    expect(body.sharePopup).toEqual({
+      mode: null,
+      imageUrl: null,
+      title: null,
+      body: null,
+      actionLabel: null,
+      actionUrl: null,
     });
     // Issuing is an enrollment capability; a handoff link has none.
     expect(body).not.toHaveProperty("canIssue");
@@ -260,7 +280,11 @@ describe("public share router", () => {
     });
 
     const response = await router.handle(
-      new Request(`http://internal.test/share/${VALID_TOKEN}/issue`, { method: "POST" }),
+      new Request(`http://internal.test/share/${VALID_TOKEN}/issue`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ nameHint: "Ada" }),
+      }),
     );
     expect(response.status).toBe(201);
     expect(response.headers.get("cache-control")).toBe("no-store");
@@ -279,6 +303,26 @@ describe("public share router", () => {
       },
     ]);
   });
+  test("requires a nonblank recipient name before issuing a child key", async () => {
+    const store = fakeStore([{ token: VALID_TOKEN, row: shareRow() }]);
+    const router = createShareRouter({
+      db: noopDb,
+      shareStore: store,
+      resolveClientIp: () => "198.51.100.9",
+    });
+    for (const body of [{}, { nameHint: "   " }, { nameHint: 12 }]) {
+      const response = await router.handle(
+        new Request(`http://internal.test/share/${VALID_TOKEN}/issue`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      );
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: "name_required" } });
+    }
+    expect(store.issued).toEqual([]);
+  });
 
   test("rejects a second child key for an already active client IP", async () => {
     const store = fakeStore([{ token: VALID_TOKEN, row: shareRow() }]);
@@ -288,7 +332,13 @@ describe("public share router", () => {
       resolveClientIp: () => "198.51.100.9",
     });
     const request = () =>
-      router.handle(new Request(`http://internal.test/share/${VALID_TOKEN}/issue`, { method: "POST" }));
+      router.handle(
+        new Request(`http://internal.test/share/${VALID_TOKEN}/issue`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ nameHint: "Ada" }),
+        }),
+      );
 
     expect((await request()).status).toBe(201);
     const second = await request();

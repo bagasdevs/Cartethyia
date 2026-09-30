@@ -70,6 +70,12 @@ const expectedColumns: Record<string, readonly ExpectedColumn[]> = {
     column("notes_title", "text", "text", "YES"),
     column("notes_subtitle", "text", "text", "YES"),
     column("notes_body", "text", "text", "YES"),
+    column("share_popup_mode", "text", "text", "YES"),
+    column("share_popup_image_url", "text", "text", "YES"),
+    column("share_popup_title", "text", "text", "YES"),
+    column("share_popup_body", "text", "text", "YES"),
+    column("share_popup_action_label", "text", "text", "YES"),
+    column("share_popup_action_url", "text", "text", "YES"),
   ],
   share_links: [
     column("id", "uuid", "uuid", "NO"),
@@ -331,7 +337,12 @@ const expectedColumns: Record<string, readonly ExpectedColumn[]> = {
     column("request_id", "uuid", "uuid", "YES"),
     column("captured_at", "timestamp with time zone", "timestamptz", "NO"),
     column("expires_at", "timestamp with time zone", "timestamptz", "NO"),
-    column("request_body", "jsonb", "jsonb", "YES"),
+    column("storage", "text", "text", "NO"),
+    column("file", "text", "text", "NO"),
+    column("offset", "integer", "int4", "NO"),
+    column("length", "integer", "int4", "NO"),
+    column("checksum", "text", "text", "NO"),
+    column("version", "integer", "int4", "NO"),
   ],
 };
 

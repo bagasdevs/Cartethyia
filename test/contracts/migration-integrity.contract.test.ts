@@ -129,6 +129,22 @@ describe("SQL migration integrity", () => {
     expect(migration).toContain('CREATE UNIQUE INDEX "share_links_token_hash_idx"');
     expect(migration).toContain('CREATE INDEX "idx_share_links_active"');
   });
+  test("api-key share popup fields exist in baseline and upgrade migration", async () => {
+    const baseline = await readFile(resolve(migrationsDir, "0000_baseline.sql"), "utf8");
+    const migration = await readFile(resolve(migrationsDir, "0015_api_key_share_popup.sql"), "utf8");
+    for (const name of [
+      "share_popup_mode",
+      "share_popup_image_url",
+      "share_popup_title",
+      "share_popup_body",
+      "share_popup_action_label",
+      "share_popup_action_url",
+    ]) {
+      expect(baseline).toContain(`"${name}" text`);
+      expect(migration).toContain(`ADD COLUMN IF NOT EXISTS "${name}" text`);
+    }
+    expect(migration).toContain("api_keys_share_popup_mode_check");
+  });
 
   test("baseline is self-contained: it declares every column the schema reads", async () => {
     // The baseline is the complete schema for a new database. It must include
@@ -176,5 +192,22 @@ describe("SQL migration integrity", () => {
     expect(migration).not.toContain("pg_partman");
     expect(migration).not.toContain("pg_cron");
     expect(migration).not.toContain("cleanup_expired_telemetry_payloads");
+  });
+
+  test("telemetry_payloads is a typed file-ref index, never a jsonb body column", async () => {
+    // Cutoff: captured bodies live only in on-disk frames. The Postgres row is
+    // a typed reference so a body cannot be written into the table by accident.
+    const baseline = await readFile(resolve(migrationsDir, "0000_baseline.sql"), "utf8");
+    const forward = await readFile(
+      resolve(migrationsDir, "0014_telemetry_payload_typed_ref.sql"),
+      "utf8",
+    );
+    expect(baseline).toContain('"storage" text NOT NULL');
+    expect(baseline).toContain('"file" text NOT NULL');
+    expect(baseline).toContain('"checksum" text NOT NULL');
+    expect(baseline).toContain('CONSTRAINT "telemetry_payloads_storage_check"');
+    expect(baseline).not.toContain('"request_body" jsonb');
+    expect(forward).toContain('DROP COLUMN IF EXISTS "request_body"');
+    expect(forward).toContain('ADD COLUMN IF NOT EXISTS "storage" text');
   });
 });

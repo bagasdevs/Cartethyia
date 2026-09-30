@@ -148,6 +148,14 @@ export function createShareRouter(options: ShareRouterOptions): Elysia {
           subtitle: row.notesSubtitle,
           body: row.notesBody,
         },
+        sharePopup: {
+          mode: row.sharePopupMode,
+          imageUrl: row.sharePopupImageUrl,
+          title: row.sharePopupTitle,
+          body: row.sharePopupBody,
+          actionLabel: row.sharePopupActionLabel,
+          actionUrl: row.sharePopupActionUrl,
+        },
         expiresAt: row.expiresAt,
       };
       if (resolved.kind === "handoff") {
@@ -187,18 +195,16 @@ export function createShareRouter(options: ShareRouterOptions): Elysia {
       const resolved = await shareStore.resolveShareLink(tokenHash);
       // A handoff link reveals an existing key; it never mints one.
       if (resolved === null || resolved.kind !== "enroll") return notFound();
-      // The recipient's display-name hint rides the issue body (the page caps
-      // it at 20); the store composes the final `hint-random` label and caps
-      // it at 12. Anything else in the body is ignored — the issue call mints
-      // policy from the link's template, never from the request.
-      let nameHint: string | undefined;
+      // The recipient supplies the label hint; policy still comes exclusively from the template.
+      let nameHint: string;
       try {
-        const body = (await request.json().catch(() => null)) as { nameHint?: unknown } | null;
-        if (typeof body?.nameHint === "string" && body.nameHint.trim()) {
-          nameHint = body.nameHint.trim().slice(0, SHARED_CHILD_HINT_MAX_LENGTH);
+        const body = (await request.json()) as { nameHint?: unknown };
+        if (typeof body.nameHint !== "string" || body.nameHint.trim().length === 0) {
+          return json({ error: { code: "name_required", message: "Your name is required" } }, 400);
         }
+        nameHint = body.nameHint.trim().slice(0, SHARED_CHILD_HINT_MAX_LENGTH);
       } catch {
-        nameHint = undefined;
+        return json({ error: { code: "name_required", message: "Your name is required" } }, 400);
       }
       const template = resolved.key;
       const generated = generateApiKeySecret(template.keyPrefix ?? undefined);
@@ -207,7 +213,7 @@ export function createShareRouter(options: ShareRouterOptions): Elysia {
         keyPrefix: generated.prefix,
         clientIp,
         clientIpKey,
-        ...(nameHint === undefined ? {} : { nameHint }),
+        nameHint,
       });
       if (issued.kind === "link_unavailable") return notFound();
       if (issued.kind === "ip_limit") {
