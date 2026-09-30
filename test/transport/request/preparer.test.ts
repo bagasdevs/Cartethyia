@@ -111,6 +111,73 @@ describe("canonical request preparation", () => {
     ).rejects.toMatchObject({ code: "model_not_found", status: 404 });
   });
 
+  test("CLI remapping admits a target outside the allowlist for routing:cli_mapping keys", async () => {
+    const keyId = "key-tenant-a";
+    const tenantId = "tenant-a";
+    const preparer = new ProxyRequestPreparer({
+      snapshotService: {
+        getSnapshot: async () => ({
+          revision: 1,
+          candidates: [
+            {
+              provider_id: "workbuddy",
+              model_id: "deepseek-v4.1-flash",
+              wire_family: "chat",
+              endpoint: "/v2/chat/completions",
+              capability_profile: {},
+            },
+          ],
+          aliases: {},
+          cli_aliases: {
+            [`${tenantId}:${keyId}`]: { opus: "workbuddy/deepseek-v4.1-flash" },
+          },
+          combos: {},
+        }),
+      } as never,
+      routingEngine: {
+        plan: async () =>
+          ({
+            revision: 1,
+            requested_model: "claude-opus-5-5[1m]",
+            resolved_model: "workbuddy/deepseek-v4.1-flash",
+            provider_id: "workbuddy",
+            candidates: [
+              {
+                provider_id: "workbuddy",
+                model_id: "deepseek-v4.1-flash",
+                wire_family: "chat",
+                endpoint: "/v2/chat/completions",
+                capability_profile: {},
+              },
+            ],
+          }) as RoutePlan,
+      } as never,
+      admissionService: {} as never,
+    });
+    const result = await preparer.prepare({
+      canonicalRequest: {
+        model: "claude-opus-5-5[1m]",
+        messages: [{ role: "user", content: [{ kind: "text", text: "hi" }] }],
+        generation_controls: {},
+        stream: false,
+        source_surface: "messages",
+      },
+      authorization: {
+        ...authorization,
+        id: keyId,
+        tenantId,
+        scopes: ["routing:invoke", "routing:cli_mapping"],
+        snapshot: {
+          ...authorization.snapshot,
+          model_allowlist: ["gpt-4o"],
+          scopes: ["routing:cli_mapping"],
+        },
+      },
+      deadlineMs: 60_000,
+    });
+    expect(result.plan.resolved_model).toBe("workbuddy/deepseek-v4.1-flash");
+  });
+
   test("degrades an unsupported extension content part and re-plans rather than failing", async () => {
     const plannedRequired: string[][] = [];
     const preparer = new ProxyRequestPreparer({

@@ -161,6 +161,42 @@ describe("ApiKeyAuthorizationSnapshot", () => {
     expect(isModelAllowed(snap, "openai/other")).toBe(false);
   });
 
+  test("CLI remapping satisfies allowlist when the key has routing:cli_mapping", () => {
+    const snap = createAuthorizationSnapshot({
+      api_key_id: "k-cli",
+      tenant_id: "t-cli",
+      model_allowlist: ["gpt-4o"],
+      scopes: ["routing:cli_mapping"],
+    });
+    // Neither Claude family id nor WorkBuddy target is on the allowlist — the
+    // remapping itself is the grant for keys with routing:cli_mapping.
+    expect(
+      isModelAllowed(snap, "workbuddy/deepseek-v4.1-flash", "workbuddy", "claude-opus-5-5[1m]"),
+    ).toBe(true);
+    // Without a remapping, the allowlist still rejects unlisted models.
+    expect(isModelAllowed(snap, "workbuddy/deepseek-v4.1-flash")).toBe(false);
+    // Without the scope, remapping does not bypass the allowlist.
+    const noScope = createAuthorizationSnapshot({
+      api_key_id: "k-cli-2",
+      tenant_id: "t-cli",
+      model_allowlist: ["gpt-4o"],
+    });
+    expect(
+      isModelAllowed(noScope, "workbuddy/deepseek-v4.1-flash", "workbuddy", "claude-opus-5-5[1m]"),
+    ).toBe(false);
+    // Denylist still wins over a CLI remapping.
+    const denied = createAuthorizationSnapshot({
+      api_key_id: "k-cli-3",
+      tenant_id: "t-cli",
+      model_allowlist: ["gpt-4o"],
+      model_denylist: ["deepseek-v4.1-flash"],
+      scopes: ["routing:cli_mapping"],
+    });
+    expect(
+      isModelAllowed(denied, "workbuddy/deepseek-v4.1-flash", "workbuddy", "claude-opus-5-5[1m]"),
+    ).toBe(false);
+  });
+
   test("model rules gate dispatch without pinning a provider", async () => {
     const snapshot = createAuthorizationSnapshot({
       api_key_id: "k6",

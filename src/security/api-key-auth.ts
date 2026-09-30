@@ -210,6 +210,10 @@ export type ModelRejectionReason = "model-denied" | "model-not-allowed";
  * would reject an explicitly permitted route. Denial keeps dual-form matching
  * but ignores the alias name — an allowlisted alias must not launder a denied
  * target.
+ *
+ * CLI remapping (`routing:cli_mapping` + remapped requested→target) also
+ * satisfies the allowlist: the operator explicitly routed that slot, and the
+ * client never hits the bare Anthropic id. Denylist still wins.
  */
 export function modelRejectionReason(
   snapshot: ApiKeyAuthorizationSnapshot,
@@ -223,7 +227,17 @@ export function modelRejectionReason(
   if (names.some((name) => listIncludes(snapshot.model_denylist, name))) return "model-denied";
   const allowlist = snapshot.model_allowlist;
   if (allowlist == null || listSize(allowlist) === 0) return null;
-  return names.some((name) => listIncludes(allowlist, name)) ? null : "model-not-allowed";
+  if (names.some((name) => listIncludes(allowlist, name))) return null;
+  // Operator-configured CLI route: remapped destination is allowed even when
+  // neither the Claude family id nor the WorkBuddy target is on the allowlist.
+  if (
+    requestedModel !== undefined &&
+    requestedModel !== targetModel &&
+    snapshot.scopes?.includes("routing:cli_mapping") === true
+  ) {
+    return null;
+  }
+  return "model-not-allowed";
 }
 
 export function isModelAllowed(

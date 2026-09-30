@@ -348,6 +348,23 @@ describe("ApiKeyAdmissionService", () => {
     ).rejects.toMatchObject({ code: "model_not_found" } as unknown as GatewayError);
   });
 
+  test("CLI remapping admits a target outside the allowlist when the key has routing:cli_mapping", async () => {
+    const store = new InMemoryAdmissionCounterStore();
+    const svc = new ApiKeyAdmissionService(store);
+    const snap = snapshot({
+      model_allowlist: ["gpt-4o"],
+      scopes: ["routing:cli_mapping"],
+    });
+    const ok = await svc.admit({
+      authorization: snap,
+      targetProvider: "workbuddy",
+      targetModel: "deepseek-v4.1-flash",
+      requestedModel: "claude-opus-5-5[1m]",
+    });
+    expect(ok.reservationId).toBeDefined();
+    await ok.release();
+  });
+
   test("never contacts provider/network before admission check — zero dispatches on rejection", async () => {
     const store = new InMemoryAdmissionCounterStore();
     const svc = new ApiKeyAdmissionService(store);

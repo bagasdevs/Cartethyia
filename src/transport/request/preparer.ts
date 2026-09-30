@@ -362,12 +362,19 @@ export class ProxyRequestPreparer {
       allowCliMappings,
       authorization.id,
     );
+    // Pass `request.model` as the requested name so an allowlisted alias / a
+    // CLI remapping can authorize the resolved target (see modelRejectionReason).
+    const allowedForKey = isModelAllowed(
+      authorization.snapshot,
+      resolvedTarget,
+      undefined,
+      request.model,
+    );
     if (
       authorization.modelPrefix &&
       !request.model.startsWith(authorization.modelPrefix) &&
       !resolvedTarget.startsWith(authorization.modelPrefix) &&
-      !isModelAllowed(authorization.snapshot, request.model) &&
-      !isModelAllowed(authorization.snapshot, resolvedTarget)
+      !allowedForKey
     )
       throw new GatewayError(
         "model_not_found",
@@ -375,10 +382,7 @@ export class ProxyRequestPreparer {
         "model does not match the key's required prefix",
         { model: request.model, required_prefix: authorization.modelPrefix },
       );
-    if (
-      !isModelAllowed(authorization.snapshot, request.model) &&
-      !isModelAllowed(authorization.snapshot, resolvedTarget)
-    ) {
+    if (!allowedForKey) {
       throw new GatewayError("model_not_found", 404, "model is not allowed for this API key", {
         model: request.model,
       });
