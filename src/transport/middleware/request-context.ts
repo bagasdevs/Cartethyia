@@ -204,6 +204,9 @@ export function createProxyRoutePreparationMiddleware(deps: {
         authorization: state.authorization,
         deadlineMs: state.deadlineMs,
         signal: state.abortController.signal,
+        ...(state.clientUserAgent === undefined
+          ? {}
+          : { clientUserAgent: state.clientUserAgent }),
       });
     })
     .as("plugin");

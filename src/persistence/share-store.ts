@@ -442,6 +442,7 @@ export class DrizzleShareLinkStore implements ShareLinkStore {
             modelPrefix: parent.modelPrefix,
             modelAllowlist: parent.modelAllowlist,
             modelDenylist: parent.modelDenylist,
+            clientRouterDenylist: parent.clientRouterDenylist,
             lifetimeTokensConsumed: 0,
           })
           .returning({ id: apiKeys.id, tenantId: apiKeys.tenantId, createdAt: apiKeys.createdAt });

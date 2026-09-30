@@ -311,7 +311,10 @@ persisted with removed slots pruned and audited as `cli_tool.mappings_saved`.
 
 Mapping is opt-out at the tenant configuration layer, but **request-time CLI mapping is API-key
 gated**: only keys carrying the `routing:cli_mapping` scope may consume these source→target rows,
-and keys without it keep normal model/alias routing and are never silently remapped. the assistant family
+and only when the inbound User-Agent identifies that remote CLI (Claude Code: `claude-cli/` /
+`claude-code/`). Keys without the scope, or callers that are not that CLI, keep normal
+model/alias routing and are never silently remapped — so a Claude→DeepSeek `opus` remap cannot
+steal `opus` from another client on the same key. the assistant family
 matching is version-tolerant — a Claude mapping source such as `sonnet` resolves the same family
 slot, and the persisted target remains the routed model.
 

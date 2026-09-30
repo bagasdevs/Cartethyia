@@ -141,6 +141,9 @@ export function createAuthorizationSnapshot(input: {
   return freezeSnapshot({
     api_key_id: input.api_key_id,
     tenant_id: input.tenant_id,
+    ...(input.admission_identity !== undefined
+      ? { admission_identity: input.admission_identity }
+      : {}),
     ...(input.model_allowlist !== undefined && input.model_allowlist !== null
       ? { model_allowlist: input.model_allowlist as readonly string[] }
       : {}),
@@ -211,9 +214,10 @@ export type ModelRejectionReason = "model-denied" | "model-not-allowed";
  * but ignores the alias name — an allowlisted alias must not launder a denied
  * target.
  *
- * CLI remapping (`routing:cli_mapping` + remapped requested→target) also
- * satisfies the allowlist: the operator explicitly routed that slot, and the
- * client never hits the bare Anthropic id. Denylist still wins.
+ * CLI remapping (`routing:cli_mapping` + remapped requested→target + a
+ * Claude CLI User-Agent gate in the preparer) also satisfies the allowlist:
+ * the operator explicitly routed that slot for Claude Code, and the client
+ * never hits the bare Anthropic id. Denylist still wins.
  */
 export function modelRejectionReason(
   snapshot: ApiKeyAuthorizationSnapshot,
@@ -310,27 +314,35 @@ export async function resolveApiKeyAuthorization(
   // One extra SELECT on the auth path, only for keys that have a parent.
   const parent =
     row.parentKeyId !== null ? await store.findActiveById(row.parentKeyId) : undefined;
-  const budget = parent ?? row;
+  // Share children authenticate as themselves but inherit the template's live
+  // policy. Copy-on-issue alone went stale the moment an operator tightened a
+  // limit or blocked a client router on the parent — existing recipients kept
+  // the old row values forever. Reading the parent here makes denylist /
+  // one-time / recurring edits apply on the next cache miss.
+  const policy = parent ?? row;
   const consumed =
-    (budget.id === row.id
+    (policy.id === row.id
       ? (row.lifetimeTokensConsumed ?? 0)
-      : (budget.lifetimeTokensConsumed ?? 0)) +
-    (await store.sumChildrenConsumed(budget.id));
-  const scopes = Array.isArray(row.scopes) ? (row.scopes as AccessScope[]) : [];
+      : (policy.lifetimeTokensConsumed ?? 0)) +
+    (await store.sumChildrenConsumed(policy.id));
+  const scopes = Array.isArray(policy.scopes) ? (policy.scopes as AccessScope[]) : [];
   const snapshot = createAuthorizationSnapshot({
     api_key_id: row.id,
     tenant_id: row.tenantId,
-    ...(row.modelAllowlist ? { model_allowlist: row.modelAllowlist as string[] } : {}),
-    ...(row.modelDenylist ? { model_denylist: row.modelDenylist as string[] } : {}),
-    ...(row.clientRouterDenylist
-      ? { client_router_denylist: row.clientRouterDenylist as string[] }
+    // Family quota / concurrency share one admission counter namespace so two
+    // recipients cannot each burn a full lifetime/daily budget.
+    ...(parent ? { admission_identity: parent.id } : {}),
+    ...(policy.modelAllowlist ? { model_allowlist: policy.modelAllowlist as string[] } : {}),
+    ...(policy.modelDenylist ? { model_denylist: policy.modelDenylist as string[] } : {}),
+    ...(policy.clientRouterDenylist
+      ? { client_router_denylist: policy.clientRouterDenylist as string[] }
       : {}),
-    ...(row.requestsPerMinute != null ? { rpm: row.requestsPerMinute } : {}),
-    ...(row.dailyTokenLimit != null ? { daily_tokens: row.dailyTokenLimit } : {}),
-    ...(row.monthlyTokenLimit != null ? { monthly_tokens: row.monthlyTokenLimit } : {}),
-    ...(budget.lifetimeTokenBudget != null ? { lifetime_token_budget: budget.lifetimeTokenBudget } : {}),
+    ...(policy.requestsPerMinute != null ? { rpm: policy.requestsPerMinute } : {}),
+    ...(policy.dailyTokenLimit != null ? { daily_tokens: policy.dailyTokenLimit } : {}),
+    ...(policy.monthlyTokenLimit != null ? { monthly_tokens: policy.monthlyTokenLimit } : {}),
+    ...(policy.lifetimeTokenBudget != null ? { lifetime_token_budget: policy.lifetimeTokenBudget } : {}),
     lifetime_tokens_consumed: consumed,
-    ...(row.maxConcurrentRequests != null ? { max_concurrent: row.maxConcurrentRequests } : {}),
+    ...(policy.maxConcurrentRequests != null ? { max_concurrent: policy.maxConcurrentRequests } : {}),
     scopes,
   });
 
@@ -339,7 +351,7 @@ export async function resolveApiKeyAuthorization(
     tenantId: row.tenantId,
     scopes,
     snapshot,
-    ...(row.modelPrefix ? { modelPrefix: row.modelPrefix } : {}),
+    ...(policy.modelPrefix ? { modelPrefix: policy.modelPrefix } : {}),
   };
   // Populate cache and reverse index.
   authCache.set(hash, { at: Date.now(), value });

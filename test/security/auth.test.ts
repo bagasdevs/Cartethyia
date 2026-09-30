@@ -246,3 +246,26 @@ describe("ApiKeyAuthorizationSnapshot", () => {
   });
 });
 });
+
+describe("share-template policy snapshot shape", () => {
+  test("createAuthorizationSnapshot preserves admission_identity for family counters", () => {
+    // Auth resolution stamps the parent id here so every share child shares one
+    // admission counter namespace while api_key_id stays the authenticating child.
+    const snap = createAuthorizationSnapshot({
+      api_key_id: "child-1",
+      tenant_id: "tenant-a",
+      admission_identity: "parent-1",
+      client_router_denylist: ["9router"],
+      daily_tokens: 1_000,
+      lifetime_token_budget: 5_000,
+      lifetime_tokens_consumed: 120,
+      scopes: ["routing:invoke"],
+    });
+    expect(snap.api_key_id).toBe("child-1");
+    expect(snap.admission_identity).toBe("parent-1");
+    expect(snap.client_router_denylist).toEqual(["9router"]);
+    expect(snap.daily_tokens).toBe(1_000);
+    expect(snap.lifetime_token_budget).toBe(5_000);
+    expect(snap.lifetime_tokens_consumed).toBe(120);
+  });
+});

@@ -178,8 +178,9 @@ naming `field: "model"` — a blank id must not reach the snapshot read or reser
 CLI-scope alias target → key-prefix check → key model allowlist
 (requested or resolved name) → variant plan loop → repair/sanitize → intersect projection → token estimates.
 
--  **Alias/allowlist** — `resolveAliasTarget()` honors CLI mappings only for keys with `routing:cli_mapping`;
-  `isModelAllowed()` accepts either spelling.
+-  **Alias/allowlist** — `resolveAliasTarget()` honors CLI mappings only when the key has
+  `routing:cli_mapping` **and** the inbound User-Agent identifies a remote-mapping CLI
+  (`claude-cli/` / `claude-code/` via `allowsCliToolMappings`); `isModelAllowed()` accepts either spelling.
 -  **Variant loop** — `degradedRequestVariants()` yields the original request then progressively degraded copies;
   `routingEngine.plan()` runs per variant with its `required` set, skipping `capability_unsupported` until the first non-empty
   plan wins. Total failure is a 400 with the model attached. Degradation warns once per minute per (model, capability-set),

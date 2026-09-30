@@ -185,10 +185,29 @@ export function createApiKeyOperations(config: ApiKeyConfig) {
           : { clientRouterDenylist: patchRequest.clientRouterDenylist }),
       });
       if (!updated) throw new ConsoleDomainError("key_not_found", 404, "Key not found");
+      const children = await config.store.listChildren(authorized.tenantId, keyId);
+      // Parent policy is live-inherited by children at auth time, so their
+      // cached snapshots must die with the parent — otherwise a denylist /
+      // budget edit looks like a no-op for up to AUTH_CACHE_TTL_MS per child.
       invalidateApiKeyCache(keyId);
+      for (const child of children) invalidateApiKeyCache(child.id);
 
-      if (modeChanged || secret !== undefined) {
-        const children = await config.store.listChildren(authorized.tenantId, keyId);
+      // Denylist / allowlist / scopes are auth-snapshot fields: cache
+      // invalidation above is enough. Only quota/concurrency edits need an
+      // admission purge — otherwise blocking 9Router would also wipe RPM /
+      // daily counters for every recipient mid-day.
+      const limitsChanged =
+        modeChanged ||
+        secret !== undefined ||
+        patchRequest.requestsPerMinute !== undefined ||
+        patchRequest.dailyTokenLimit !== undefined ||
+        patchRequest.monthlyTokenLimit !== undefined ||
+        patchRequest.lifetimeTokenBudget !== undefined ||
+        patchRequest.maxConcurrentRequests !== undefined;
+      if (limitsChanged) {
+        // Drop stale admission counters so a newly lowered one-time/recurring
+        // budget cannot be bypassed by a counter seeded under the old limit.
+        // Share children admit under the parent id, so purge the parent too.
         await Promise.all([
           config.admissionService.purgeKey(keyId),
           ...children.map((child) => config.admissionService.purgeKey(child.id)),
@@ -206,8 +225,9 @@ export function createApiKeyOperations(config: ApiKeyConfig) {
       const authorized = requireTenantScope(access, "dashboard:write");
       const revoked = await config.store.revoke(authorized.tenantId, keyId, new Date());
       if (!revoked) throw new ConsoleDomainError("key_not_found", 404, "Key not found");
-      invalidateApiKeyCache(keyId);
       const children = await config.store.listChildren(authorized.tenantId, keyId);
+      invalidateApiKeyCache(keyId);
+      for (const child of children) invalidateApiKeyCache(child.id);
       await Promise.all([
         config.admissionService.purgeKey(keyId),
         ...children.map((child) => config.admissionService.purgeKey(child.id)),

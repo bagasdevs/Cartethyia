@@ -6,6 +6,7 @@ import { resolveAliasTarget, type RoutingEngine } from "../routing/router";
 import { deriveRequiredCapabilities, projectForRoute, routeCapabilitiesFor } from "../translation/capabilities";
 import type { RequiredCapability } from "../translation/capabilities";
 import { isModelAllowed, type ResolvedApiKey } from "../../security/api-key-auth";
+import { allowsCliToolMappings } from "../../security/cli-client-fingerprint";
 import { dropIncompleteToolRounds, repairRequestToolCalls } from "../translation/tool-repair";
 import { sanitizeRequestToolIds } from "../translation/tool-id";
 import { log } from "../../observability/logger";
@@ -341,6 +342,8 @@ export class ProxyRequestPreparer {
     readonly authorization: ResolvedApiKey;
     readonly deadlineMs: number;
     readonly signal?: AbortSignal;
+    /** Inbound `User-Agent`; gates remote CLI remaps so short slots stay tool-local. */
+    readonly clientUserAgent?: string;
   }): Promise<PreparedProxyRequest> {
     const { canonicalRequest: request, authorization, signal } = input;
     if (signal?.aborted)
@@ -351,7 +354,12 @@ export class ProxyRequestPreparer {
       });
     }
     const snapshot = await this.deps.snapshotService.getSnapshot();
-    const allowCliMappings = authorization.scopes.includes("routing:cli_mapping");
+    // Scope opts the key into the mapping table; the User-Agent decides whether
+    // *this* request may consume it. Without the UA gate, a Claude→DeepSeek
+    // remap would also rewrite a non-Claude caller that named `opus`.
+    const allowCliMappings = allowsCliToolMappings(authorization.scopes, {
+      ...(input.clientUserAgent === undefined ? {} : { userAgent: input.clientUserAgent }),
+    });
     // CLI source→target mappings are an explicit API-key capability. Ordinary
     // tenant aliases remain available to every key; only selected keys may
     // consume the CLI mapping table.

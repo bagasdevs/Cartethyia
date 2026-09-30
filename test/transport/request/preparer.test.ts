@@ -174,8 +174,155 @@ describe("canonical request preparation", () => {
         },
       },
       deadlineMs: 60_000,
+      clientUserAgent: "claude-cli/2.1.280 (external, cli)",
     });
     expect(result.plan.resolved_model).toBe("workbuddy/deepseek-v4.1-flash");
+  });
+
+  test("CLI remapping stays off for non-Claude User-Agents even with routing:cli_mapping", async () => {
+    const keyId = "key-tenant-a";
+    const tenantId = "tenant-a";
+    let plannedWithCli = false;
+    const preparer = new ProxyRequestPreparer({
+      snapshotService: {
+        getSnapshot: async () => ({
+          revision: 1,
+          candidates: [
+            {
+              provider_id: "workbuddy",
+              model_id: "deepseek-v4.1-flash",
+              wire_family: "chat",
+              endpoint: "/v2/chat/completions",
+              capability_profile: {},
+            },
+            {
+              provider_id: "anthropic",
+              model_id: "claude-opus-4",
+              wire_family: "messages",
+              endpoint: "/v1/messages",
+              capability_profile: {},
+            },
+          ],
+          aliases: {
+            [tenantId]: { opus: "anthropic/claude-opus-4" },
+          },
+          cli_aliases: {
+            [`${tenantId}:${keyId}`]: { opus: "workbuddy/deepseek-v4.1-flash" },
+          },
+          combos: {},
+        }),
+      } as never,
+      routingEngine: {
+        plan: async (
+          _model: string,
+          _snapshot: unknown,
+          _tenantId: string,
+          _required: unknown,
+          allowCliMappings?: boolean,
+        ) => {
+          plannedWithCli = allowCliMappings === true;
+          return {
+            revision: 1,
+            requested_model: "opus",
+            resolved_model: "anthropic/claude-opus-4",
+            provider_id: "anthropic",
+            candidates: [
+              {
+                provider_id: "anthropic",
+                model_id: "claude-opus-4",
+                wire_family: "messages",
+                endpoint: "/v1/messages",
+                capability_profile: {},
+              },
+            ],
+          } as RoutePlan;
+        },
+      } as never,
+      admissionService: {} as never,
+    });
+    // Same key + mapping as Claude, but Codex UA must not consume the Claude
+    // remap — otherwise `opus` can never reach the real Anthropic alias.
+    const result = await preparer.prepare({
+      canonicalRequest: {
+        model: "opus",
+        messages: [{ role: "user", content: [{ kind: "text", text: "hi" }] }],
+        generation_controls: {},
+        stream: false,
+        source_surface: "chat",
+      },
+      authorization: {
+        ...authorization,
+        id: keyId,
+        tenantId,
+        scopes: ["routing:invoke", "routing:cli_mapping"],
+        snapshot: {
+          ...authorization.snapshot,
+          model_allowlist: ["opus", "anthropic/claude-opus-4", "workbuddy/deepseek-v4.1-flash"],
+          scopes: ["routing:cli_mapping"],
+        },
+      },
+      deadlineMs: 60_000,
+      clientUserAgent: "codex_cli_rs/0.155.1",
+    });
+    expect(plannedWithCli).toBe(false);
+    expect(result.plan.resolved_model).toBe("anthropic/claude-opus-4");
+  });
+
+  test("CLI remapping rejects outside-allowlist targets when User-Agent is missing", async () => {
+    const keyId = "key-tenant-a";
+    const tenantId = "tenant-a";
+    const preparer = new ProxyRequestPreparer({
+      snapshotService: {
+        getSnapshot: async () => ({
+          revision: 1,
+          candidates: [
+            {
+              provider_id: "workbuddy",
+              model_id: "deepseek-v4.1-flash",
+              wire_family: "chat",
+              endpoint: "/v2/chat/completions",
+              capability_profile: {},
+            },
+          ],
+          aliases: {},
+          cli_aliases: {
+            [`${tenantId}:${keyId}`]: { opus: "workbuddy/deepseek-v4.1-flash" },
+          },
+          combos: {},
+        }),
+      } as never,
+      routingEngine: {
+        plan: async () => {
+          throw new Error("plan must not run when remapping is gated off");
+        },
+      } as never,
+      admissionService: {} as never,
+    });
+    await expect(
+      preparer.prepare({
+        canonicalRequest: {
+          model: "opus",
+          messages: [{ role: "user", content: [{ kind: "text", text: "hi" }] }],
+          generation_controls: {},
+          stream: false,
+          source_surface: "messages",
+        },
+        authorization: {
+          ...authorization,
+          id: keyId,
+          tenantId,
+          scopes: ["routing:invoke", "routing:cli_mapping"],
+          snapshot: {
+            ...authorization.snapshot,
+            // DeepSeek is the remap target; without UA the request stays `opus`
+            // and must not launder through the remapping allowlist grant.
+            model_allowlist: ["workbuddy/deepseek-v4.1-flash"],
+            scopes: ["routing:cli_mapping"],
+          },
+        },
+        deadlineMs: 60_000,
+      }),
+    ).rejects.toMatchObject({ code: "model_not_found", status: 404 });
   });
 
   test("degrades an unsupported extension content part and re-plans rather than failing", async () => {

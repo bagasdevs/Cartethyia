@@ -603,13 +603,13 @@ export class ApiKeyAdmissionService {
         const actual = usageTokens(usage);
         await this.store.reconcile(apiKeyId, estimatedTokens, actual, reservationId);
         finalized = true;
-        // Persist the reconciled usage against `api_keys.lifetime_tokens_consumed`
-        // so lifetime budgets survive a Redis flush; keyed on the actual
-        // (not the reserved) tokens because the reservation was already
-        // credited at admit-time and reconciled by the store above.
+        // Persist against the authenticating key (`snapshot.api_key_id`), not
+        // the admission identity. Share children share the parent's counter
+        // namespace for enforcement, but attribution must still land on the
+        // child row so recipient usage and sumChildrenConsumed stay correct.
         if (snapshot.lifetime_token_budget != null && this.persistLifetimeUsage) {
           try {
-            await this.persistLifetimeUsage({ apiKeyId, delta: actual });
+            await this.persistLifetimeUsage({ apiKeyId: snapshot.api_key_id, delta: actual });
           } catch {
             // Non-fatal: the transient counter already reflects reality; a
             // subsequent request will overwrite the row with the fresh count.

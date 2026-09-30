@@ -223,6 +223,57 @@ describe("ApiKeyAdmissionService", () => {
     await ok.release();
   });
 
+  test("share children sharing admission_identity share one lifetime budget", async () => {
+    // Two recipients of one template must not each get a full one-time budget.
+    // Auth sets admission_identity to the parent; counters key on that identity.
+    const store = new InMemoryAdmissionCounterStore();
+    const persisted: Array<{ apiKeyId: string; delta: number }> = [];
+    const svc = new ApiKeyAdmissionService(
+      store,
+      () => Date.now(),
+      () => null,
+      async (input) => {
+        persisted.push(input);
+      },
+    );
+    const childA = snapshot({
+      api_key_id: "child-a",
+      admission_identity: "parent-1",
+      lifetime_token_budget: 100,
+      lifetime_tokens_consumed: 0,
+    });
+    const childB = snapshot({
+      api_key_id: "child-b",
+      admission_identity: "parent-1",
+      lifetime_token_budget: 100,
+      lifetime_tokens_consumed: 0,
+    });
+    const leaseA = await svc.admit({
+      authorization: childA,
+      targetProvider: "openai",
+      targetModel: "gpt-4",
+      estimatedInputTokens: 80,
+    });
+    await expect(
+      svc.admit({
+        authorization: childB,
+        targetProvider: "openai",
+        targetModel: "gpt-4",
+        estimatedInputTokens: 30,
+      }),
+    ).rejects.toMatchObject({ code: "quota_exceeded" } as unknown as GatewayError);
+    await leaseA.commitUsage({
+      input_tokens: 80,
+      output_tokens: 0,
+      cached_input_tokens: 0,
+      cache_write_tokens: 0,
+      uncached_input_tokens: 80,
+      reasoning_tokens: 0,
+      estimated_cost: 0,
+    });
+    expect(persisted).toEqual([{ apiKeyId: "child-a", delta: 80 }]);
+  });
+
   test("enforces max_concurrent with lease release on every terminal path", async () => {
     const store = new InMemoryAdmissionCounterStore();
     const svc = new ApiKeyAdmissionService(store);

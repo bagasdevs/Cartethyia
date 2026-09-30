@@ -122,7 +122,12 @@ Stateless, no DB.
 
 A share template is non-authenticating: the database shape constraint requires
 its `key_hash` and `key_encrypted` to be null. A child has a hash, parent id,
-and canonical issued-client-IP identity, but no recoverable secret. Public
+and canonical issued-client-IP identity, but no recoverable secret. At auth
+time the child inherits the template's **live** policy (limits, model lists,
+`client_router_denylist`, scopes) and stamps `admission_identity` to the
+parent so one-time/recurring budgets and concurrency are family-wide; lifetime
+usage still persists on the child row for recipient attribution. Parent edits
+invalidate every child's auth cache and purge admission counters. Public
 enrollment resolves the client only through `resolveClientIdentity`; forwarded
 headers are ignored unless the trusted-proxy boundary accepts them. The
 database partial unique index enforces one active child per canonical IP
@@ -143,6 +148,11 @@ request or response payloads.
   subset); `createAccessDecision` (frozen; empty
   tenant scopes default to `routing:invoke`; `tenantId: null` = cross-tenant
   operator).
+- `cli-client-fingerprint.ts`: best-effort remote CLI tool id from inbound
+  `User-Agent` (`claude-cli/` / `claude-code/` → `claude`). The preparer only
+  consumes `routing:cli_mapping` remaps when this detector labels the caller,
+  so a Claude→DeepSeek slot remap cannot rewrite a non-Claude client that
+  happened to send `opus`. Spoofable; not a security boundary.
 - `crypto.ts`: AES-256-GCM (`iv12 || tag16 || ciphertext`, key from
   `CARTETHYIA_ENCRYPTION_KEY`, no fallback, cached after first decode) +
   `decryptCredentialToString` (used by the pool loader and credential service)
