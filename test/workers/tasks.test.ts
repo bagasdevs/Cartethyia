@@ -1,6 +1,27 @@
 import { describe, expect, test } from "bun:test";
 import { ScheduledTaskRegistry } from "../../src/workers/tasks";
 
+/**
+ * Waits until `predicate` holds, or throws at the deadline.
+ *
+ * A recurring-timer test cannot assert a tick *count* against a wall-clock
+ * sleep. `setInterval` coalesces under load, so a 5 ms interval can deliver a
+ * single tick inside a 40 ms window when the process is busy — which is what
+ * happens when this suite runs in parallel beside the DB-backed ones, and it
+ * failed there intermittently with `Received: 1`. Waiting for the observable
+ * condition keeps the contract under test (the task recurs; `stop()` cancels
+ * it) without pinning it to timer-delivery timing.
+ */
+async function waitUntil(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) {
+      throw new Error(`condition not met within ${timeoutMs}ms`);
+    }
+    await Bun.sleep(2);
+  }
+}
+
 describe("ScheduledTaskRegistry", () => {
   test("runNow runs a named task immediately, bypassing its interval", async () => {
     let calls = 0;
@@ -66,11 +87,14 @@ describe("ScheduledTaskRegistry", () => {
     const registry = new ScheduledTaskRegistry();
     registry.register({ name: "ticking", intervalMs: 5, run: () => void calls++ });
     registry.start();
-    await Bun.sleep(40);
+    // The task recurs: wait for the second tick rather than asserting a count
+    // a fixed sleep was expected to have delivered.
+    await waitUntil(() => calls >= 2);
     await registry.stop();
     const afterStop = calls;
-    expect(afterStop).toBeGreaterThanOrEqual(2);
-    await Bun.sleep(30);
+    // And stop cancels it: give the timer a window in which a surviving
+    // interval would have fired again, then assert the count is frozen.
+    await Bun.sleep(40);
     expect(calls).toBe(afterStop);
   });
 

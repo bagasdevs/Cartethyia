@@ -269,6 +269,9 @@ const expectedColumns: Record<string, readonly ExpectedColumn[]> = {
     column("target_model", "text", "text", "NO"),
     column("enabled", "boolean", "bool", "NO"),
     column("updated_at", "timestamp with time zone", "timestamptz", "NO"),
+    // Added last by `0013_cli_mapping_per_key.sql`, so it holds the highest
+    // ordinal position — the query above orders by `ordinal_position`.
+    column("api_key_id", "uuid", "uuid", "NO"),
   ],
   cli_tool_settings: [
     column("tenant_id", "uuid", "uuid", "NO"),
@@ -276,6 +279,7 @@ const expectedColumns: Record<string, readonly ExpectedColumn[]> = {
     column("mappings_enabled", "boolean", "bool", "NO"),
     column("mode", "text", "text", "NO"),
     column("updated_at", "timestamp with time zone", "timestamptz", "NO"),
+    column("api_key_id", "uuid", "uuid", "NO"),
   ],
   telemetry_events: [
     column("id", "uuid", "uuid", "NO"),
@@ -434,7 +438,9 @@ dbDescribe("isolated PostgreSQL schema", () => {
       "admin_audit_log.tenant_id->tenants.id:set null",
       "api_keys.tenant_id->tenants.id:cascade",
       "api_keys.parent_key_id->api_keys.id:cascade",
+      "cli_tool_mappings.api_key_id->api_keys.id:cascade",
       "cli_tool_mappings.tenant_id->tenants.id:cascade",
+      "cli_tool_settings.api_key_id->api_keys.id:cascade",
       "cli_tool_settings.tenant_id->tenants.id:cascade",
       "console_sessions.user_id->console_users.id:cascade",
       "console_settings.tenant_id->tenants.id:cascade",
