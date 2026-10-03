@@ -428,10 +428,12 @@ then runs `runAttemptLoop` over `eligibleRouteCandidates`.
 **Cache affinity reaches the adapter.** `handleProviderProxyRequest` resolves `conversationAffinity`
 once per request via `resolvePromptCacheKey(canonicalRequest, …)` and threads it onto the dispatch
 context (`buildUpstreamDispatchContext`, exposed as `ProviderDispatchContext.conversation_affinity`).
-An adapter that mints its own per-request session id uses it in place of a random value — opencode
-sends it as both `x-opencode-session` and `x-opencode-request` — so a repeated conversation keeps one
-stable upstream cache key instead of missing on every turn. Without it the affinity the session
-resolver already derived never reached the headers that carry it.
+The same value reaches fusion panel and judge dispatches. Buddy adapters use it for
+`x-conversation-id`; OpenCode Free/Zen use it only for `x-opencode-session`. Request correlation
+IDs remain fresh per dispatch. Short anonymous prompts without a derived identity keep fresh
+conversation IDs; clients needing continuity must supply an explicit session/cache key.
+> **Correction.** Affinity stabilizes identity, not upstream cache availability, and must not
+> replace `x-opencode-request`; the earlier description conflated session and request IDs.
 
 **Dispatch-time projection.** When a candidate's `model_id` differs from the requested model (an alias,
 combo, or CLI mapping resolved to it), `handleProviderProxyRequest` re-projects the request through

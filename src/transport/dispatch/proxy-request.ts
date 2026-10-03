@@ -191,6 +191,7 @@ export async function handleProviderProxyRequest(
       canonicalRequest,
       inboundHeaders,
       fusion: prepared.plan.fusion,
+      ...(conversationAffinity ? { conversationAffinity } : {}),
     }).then(({ events }) => encodeCanonicalResponse(canonicalRequest, events, state));
   }
   return runAttemptLoop<Response, ProviderAdapter>({

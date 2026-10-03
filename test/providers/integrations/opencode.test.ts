@@ -92,6 +92,24 @@ describe("OpenCode provider header policy", () => {
     }
   });
 
+  test("Free and Zen keep session affinity but mint a separate id for every request", async () => {
+    for (const tier of TIERS.filter((tier) => tier.desktopHeaders)) {
+      const requestIds: string[] = [];
+      for (let turn = 0; turn < 2; turn += 1) {
+        const captured = await dispatchJson({
+          create: tier.create,
+          candidate: candidateFor(tier.id, "chat", tier.path),
+          context: { ...dispatchContext(tier.id), conversation_affinity: "client-session" },
+        });
+        expect(captured.headers["x-opencode-session"]).toBe("client-session");
+        const requestId = captured.headers["x-opencode-request"] ?? "";
+        expect(requestId).toMatch(/^msg_[0-9a-f]{30}$/);
+        requestIds.push(requestId);
+      }
+      expect(requestIds[0]).not.toBe(requestIds[1]);
+    }
+  });
+
   test("Go keeps API-key auth on the separate base and disables response storage", async () => {
     const captured = await dispatchJson({
       create: (fetchImpl) => createApiKeyAdapter(OPENCODE_GO_SPEC, fetchImpl),

@@ -644,17 +644,20 @@ deadlines. Routing, console, and discovery consume providers through these servi
   `prompt-cache-key`, `session-id`), then the canonical conversation id; when a client sends neither, it
   derives a stable `aff_<sha256 prefix>` key from the opening turn — the system prompt when it carries at
   least 30 characters, otherwise the first message's text — hashed over the first 2048 trimmed characters.
-  A stateless HTTP client that repeats the same opening turn therefore keeps hitting the upstream prompt
-  cache across turns instead of missing on every call. Text shorter than the threshold derives nothing, so a
-  trivial prompt cannot collapse unrelated conversations onto one affinity key.
+  A stateless HTTP client repeating the same opening turn therefore reuses the cache identity;
+  an upstream cache hit is not guaranteed. Text shorter than the threshold derives nothing.
+  Without an explicit identity, short prompts retain fresh conversation IDs rather than being
+  grouped by API key/model; clients needing continuity must send the same session/cache key.
   `resolvePromptCacheKey(request, context)` prefers an explicit caller cache key from any surface
   (chat `prompt_cache_key`, responses `prompt_cache_key`, messages `metadata.user_id`) before that
   session fallback (headers on `context`, then conversation id), and never includes the client IP.
   Dispatch resolves that key once and threads it onto the dispatch context as
-  `conversation_affinity`, which an adapter that mints its own session id consumes instead of
-  a random value — `buildOpenCodeHeaders` sends it as both `x-opencode-session` and
-  `x-opencode-request`. Without the pass-through a derived affinity never reached the header that
-  carries it, and every turn minted a new upstream cache key.
+  `conversation_affinity`, including fusion panel and judge calls. CodeBuddy and WorkBuddy
+  prefer that value for `x-conversation-id`, falling back to `resolvePromptCacheKey` for direct
+  adapter calls; their `x-request-id` remains fresh on every dispatch. OpenCode Free/Zen use
+  affinity only for `x-opencode-session` and always mint a separate `x-opencode-request`.
+  > **Correction.** Session affinity does not identify a request or guarantee a cache hit;
+  > the earlier description incorrectly reused it for both OpenCode headers.
   `withUpstreamDeadline` binds the dispatch `deadline` to an abort signal (aborts →
   `transport_closed` 499) with a releasable lifecycle so timers never leak. The deadline bounds **TTFB
   only**: a streaming adapter must call `lifecycle.release()` as soon as response headers arrive, because

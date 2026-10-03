@@ -6,6 +6,15 @@
 > released; this document reflects the current production codebase architecture and capabilities.
 
 
+### Keep conversation affinity separate from request identity
+
+CodeBuddy/CN and WorkBuddy chat dispatches honor explicit cache keys even for short prompts
+and direct adapter calls. Anonymous short prompts retain separate conversation IDs; no
+API-key/model-wide session is invented. CodeBuddy/CN again send a fresh `x-request-id`.
+OpenCode Free/Zen keep session affinity while minting a fresh `x-opencode-request` for each
+dispatch. Fusion propagates the request's affinity to its panel and judge. These changes do
+not rewrite cache usage or guarantee upstream cache hits.
+
 ### Token speed no longer reports a single flushed SSE frame as decode
 
 `computeTokensPerSec` reported `output_tokens / (lastEvent - firstContent)`

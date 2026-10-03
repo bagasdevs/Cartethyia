@@ -382,8 +382,37 @@ describe("WorkBuddy integration", () => {
       // drain
     }
     expect(headers.get("x-conversation-id")).toBe("wb-session-999");
-    expect(headers.get("x-request-id")).toBeDefined();
+    expect(headers.get("x-request-id")).toMatch(/^[0-9a-f]{32}$/);
   });
+  test("short prompts honor caller cache keys without merging anonymous conversations", async () => {
+    for (const field of ["extension:prompt_cache_key", "extension:responses.prompt_cache_key", "extension:metadata_user_id"]) {
+      const headers: Headers[] = [];
+      const fetcher = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        headers.push(new Headers(init?.headers));
+        return responseSse();
+      }) as typeof fetch;
+      const adapter = createWorkBuddyAdapter(fetcher);
+      for (const key of ["session-a", "session-a", "session-b", undefined, undefined]) {
+        const turn = request({
+          messages: [{ role: "user", content: [{ kind: "text", text: "hi" }] }],
+          generation_controls: key === undefined ? {} : { [field]: key },
+        });
+        const ctx: ProviderDispatchContext = {
+          ...context("oauth", "acct-wb"),
+          ...(key === undefined ? {} : { request_headers: { "x-session-id": "header-fallback" } }),
+        };
+        for await (const _event of adapter.dispatch(turn, candidate(), ctx)) {
+          // Drain the real adapter; only the upstream response is supplied.
+        }
+      }
+      const sessions = headers.map((header) => header.get("x-conversation-id"));
+      expect(sessions.slice(0, 3)).toEqual(["session-a", "session-a", "session-b"]);
+      expect(sessions[3]).toMatch(/^[0-9a-f-]{36}$/);
+      expect(sessions[4]).toMatch(/^[0-9a-f-]{36}$/);
+      expect(sessions[3]).not.toBe(sessions[4]);
+    }
+  });
+
   test("uses Claude Code session identity for the upstream conversation id", async () => {
     let headers = new Headers();
     const fetcher = (async (_input: RequestInfo | URL, init?: RequestInit) => {

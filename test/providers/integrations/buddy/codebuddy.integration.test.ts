@@ -211,23 +211,67 @@ describe("CodeBuddy adapter contracts", () => {
     });
   });
 
-  test("preserves stable x-conversation-id from inbound request headers", async () => {
-    let seenHeaders = new Headers();
-    const fetcher = (async (_input: RequestInfo | URL, init?: RequestInit) => {
-      seenHeaders = new Headers(init?.headers);
-      return responseSse();
-    }) as typeof fetch;
-    const adapter = createCodeBuddyAdapter(fetcher);
-    const dispatchCtx: ProviderDispatchContext = {
-      ...context("oauth", CODEBUDDY_PROVIDER_ID),
-      request_headers: { "x-conversation-id": "client-session-12345" },
-    };
-    for await (const _ of adapter.dispatch(request(), candidate(CODEBUDDY_PROVIDER_ID), dispatchCtx)) {
-      // drain
+  test("keeps the client conversation and rotates request ids for both CodeBuddy variants", async () => {
+    for (const [providerId, create] of [
+      [CODEBUDDY_PROVIDER_ID, createCodeBuddyAdapter],
+      [CODEBUDDY_CN_PROVIDER_ID, createCodeBuddyCnAdapter],
+    ] as const) {
+      const headers: Headers[] = [];
+      const fetcher = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        headers.push(new Headers(init?.headers));
+        return responseSse();
+      }) as typeof fetch;
+      const adapter = create(fetcher);
+      const dispatchCtx: ProviderDispatchContext = {
+        ...context("oauth", providerId),
+        request_headers: { "x-conversation-id": "client-session-12345" },
+      };
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        for await (const _event of adapter.dispatch(request(), candidate(providerId), dispatchCtx)) {
+          // Drain the real adapter to capture its outbound headers.
+        }
+      }
+      for (const captured of headers) {
+        expect(captured.get("x-conversation-id")).toBe("client-session-12345");
+        expect(captured.get("x-request-id")).toMatch(/^[0-9a-f]{32}$/);
+      }
+      expect(headers[0]?.get("x-request-id")).not.toBe(headers[1]?.get("x-request-id"));
     }
-    expect(seenHeaders.get("x-conversation-id")).toBe("client-session-12345");
-    expect(seenHeaders.get("x-request-id")).toBeDefined();
   });
+  test("short prompts honor caller cache keys without merging anonymous conversations", async () => {
+    for (const [providerId, create] of [
+      [CODEBUDDY_PROVIDER_ID, createCodeBuddyAdapter],
+      [CODEBUDDY_CN_PROVIDER_ID, createCodeBuddyCnAdapter],
+    ] as const) {
+      for (const field of ["extension:prompt_cache_key", "extension:responses.prompt_cache_key", "extension:metadata_user_id"]) {
+        const headers: Headers[] = [];
+        const fetcher = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+          headers.push(new Headers(init?.headers));
+          return responseSse();
+        }) as typeof fetch;
+        const adapter = create(fetcher);
+        for (const key of ["session-a", "session-a", "session-b", undefined, undefined]) {
+          const turn = request({
+            messages: [{ role: "user", content: [{ kind: "text", text: "hi" }] }],
+            generation_controls: key === undefined ? {} : { [field]: key },
+          });
+          const ctx: ProviderDispatchContext = {
+            ...context("oauth", providerId),
+            ...(key === undefined ? {} : { request_headers: { "x-session-id": "header-fallback" } }),
+          };
+          for await (const _event of adapter.dispatch(turn, candidate(providerId), ctx)) {
+            // Drain the real adapter; only the upstream response is supplied.
+          }
+        }
+        const sessions = headers.map((header) => header.get("x-conversation-id"));
+        expect(sessions.slice(0, 3)).toEqual(["session-a", "session-a", "session-b"]);
+        expect(sessions[3]).toMatch(/^[0-9a-f-]{36}$/);
+        expect(sessions[4]).toMatch(/^[0-9a-f-]{36}$/);
+        expect(sessions[3]).not.toBe(sessions[4]);
+      }
+    }
+  });
+
 
   test("CN neutralizes agent system prompts and keeps reasoning opt-in", () => {
     const payload: Record<string, unknown> = {

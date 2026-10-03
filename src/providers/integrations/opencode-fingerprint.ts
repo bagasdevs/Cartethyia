@@ -41,7 +41,7 @@ export function buildOpenCodeHeaders(
   return {
     "x-opencode-client": "cli",
     "x-opencode-session": affinity ?? generateOpenCodeSessionId(),
-    "x-opencode-request": affinity ?? generateOpenCodeRequestId(),
+    "x-opencode-request": generateOpenCodeRequestId(),
     "x-opencode-project": "global",
     "user-agent": `opencode/${version}`,
   };

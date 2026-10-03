@@ -8,7 +8,7 @@ import type {
   ProviderDispatchTarget,
   ProviderId,
 } from "../../provider-registry";
-import { resolveInboundSessionId } from "../../operations/session-resolution";
+import { resolvePromptCacheKey } from "../../operations/session-resolution";
 import {
   buildWorkBuddyUserAgent,
   resolveWorkBuddyVersion,
@@ -57,7 +57,8 @@ function deriveAccountStableId(accountId: string, purpose: string): string {
  * brand `WorkBuddy AI`; the wrong brand trips 403 code 11140), plus the
  * `X-CodeBuddy-Request` risk gate and the account-scoped device headers. The
  * version is resolved from upstream so the UA stays current; the pinned
- * fallback only applies on a real network failure.
+ * fallback only applies on a real network failure. The conversation id is the
+ * dispatch affinity when available, else the resolved caller identity, else a fresh id.
  */
 export async function workbuddyHeaders(
   context?: ProviderDispatchContext,
@@ -83,7 +84,8 @@ export async function workbuddyHeaders(
     // explicitly so upstream risk control does not treat the omission as
     // suspicious.
     "x-no-enterprise-id": "1",
-    "x-conversation-id": resolveInboundSessionId(context, request) ?? randomUUID(),
+    "x-conversation-id":
+      context?.conversation_affinity ?? resolvePromptCacheKey(request, context) ?? randomUUID(),
     "x-request-id": randomUUID().replaceAll("-", ""),
   };
   const accountId = context?.credential.account_id;

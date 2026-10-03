@@ -5,7 +5,7 @@ import type {
   ProviderDispatchTarget,
   ProviderId,
 } from "../../provider-registry";
-import { resolveInboundSessionId } from "../../operations/session-resolution";
+import { resolvePromptCacheKey } from "../../operations/session-resolution";
 import { buildCodeBuddyUserAgent, resolveCodeBuddyVersion } from "../../operations/client-versions";
 
 /** Client identity variant behind the per-request CodeBuddy headers. */
@@ -18,8 +18,10 @@ export function codebuddyDomain(variant: CodeBuddyVariant): string {
 
 /**
  * Per-request CodeBuddy headers — exact provider contract shared by the
- * international (IDE identity) and CN (CLI identity). The stable conversation
- * header is preserved from the client when available; request IDs rotate.
+ * international (IDE identity) and CN (CLI identity). The conversation id is
+ * the dispatch affinity when available (it already unifies body key, inbound
+ * headers, and derived fallback), else the same resolver, else a fresh id;
+ * request IDs always rotate.
  */
 export async function codebuddyHeaders(
   variant: CodeBuddyVariant,
@@ -40,7 +42,8 @@ export async function codebuddyHeaders(
     "X-Domain": codebuddyDomain(variant),
     "x-requested-with": "XMLHttpRequest",
     "x-codebuddy-request": "1",
-    "x-conversation-id": resolveInboundSessionId(context, request) ?? crypto.randomUUID(),
+    "x-conversation-id":
+      context?.conversation_affinity ?? resolvePromptCacheKey(request, context) ?? crypto.randomUUID(),
     "x-request-id": crypto.randomUUID().replaceAll("-", ""),
   };
 }

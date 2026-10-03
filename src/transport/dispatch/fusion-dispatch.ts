@@ -95,6 +95,7 @@ async function dispatchModel(
   request: CanonicalRequest,
   inboundHeaders: Record<string, string>,
   terminal: boolean,
+  conversationAffinity?: string,
 ): Promise<ModelDispatch> {
   const prepared = await deps.proxyPreparer.prepare({
     canonicalRequest: { ...request, model },
@@ -140,6 +141,7 @@ async function dispatchModel(
       deadline: state.deadlineMs,
       signal: state.abortController.signal,
       headers: inboundHeaders,
+      ...(conversationAffinity ? { conversationAffinity } : {}),
       ...(deps.networkBindingFactory
         ? {
             outboundFetch: deps.networkBindingFactory.fetch(
@@ -205,6 +207,7 @@ export async function dispatchFusionRequest(input: {
   readonly canonicalRequest: CanonicalRequest;
   readonly inboundHeaders: Record<string, string>;
   readonly fusion: { readonly panel: readonly string[]; readonly judge: string };
+  readonly conversationAffinity?: string;
 }): Promise<{ readonly events: readonly CanonicalEvent[]; readonly candidate: RouteCandidate }> {
   const { state, deps, prepared, canonicalRequest, fusion } = input;
   for (const model of fusion.panel) {
@@ -234,6 +237,7 @@ export async function dispatchFusionRequest(input: {
         panelRequest,
         input.inboundHeaders,
         false,
+        input.conversationAffinity,
       );
       return textOf(dispatch.events);
     },
@@ -251,6 +255,7 @@ export async function dispatchFusionRequest(input: {
       canonicalRequest,
       input.inboundHeaders,
       true,
+      input.conversationAffinity,
     );
     return { events: dispatch.events, candidate: dispatch.candidate };
   }
@@ -263,6 +268,7 @@ export async function dispatchFusionRequest(input: {
     finalRequest,
     input.inboundHeaders,
     true,
+    input.conversationAffinity,
   );
   return { events: dispatch.events, candidate: dispatch.candidate };
 }
