@@ -13,7 +13,7 @@ import { isRecord, readNumber, readString } from "../../protocol/primitives";
 import { usageFromProvider } from "../usage";
 import { readCredentialSecret, type ProviderDispatchTarget, type ProviderAdapter, type ProviderDispatchContext } from "../provider-registry";
 import { providerBaseUrl } from "../provider-metadata";
-import { createUpstreamDeadlineLifecycle } from "../operations/upstream-deadline";
+import { abortGatewayError, createUpstreamDeadlineLifecycle } from "../operations/upstream-deadline";
 import { defineModel } from "../model-definition";
 import type { ModelDefinition } from "../provider-registry";
 import {
@@ -21,22 +21,43 @@ import {
   resolveCommandCodeVersion,
 } from "../operations/client-versions";
 export const COMMANDCODE_MODELS: readonly ModelDefinition[] = [
-  "moonshotai/Kimi-K2.6",
-  "qwen/qwen3.5-plus",
-  "minimax/minimax-m2.7-highspeed",
-  "z-ai/glm-5.1",
+  // Synced from https://commandcode.ai/models — deepseek keep only v4.1 flash/pro
+  "xiaomi/mimo-v2.5-pro",
+  "xiaomi/mimo-v2.5",
+  "xiaomi/mimo-v2.6-pro",
+  "xiaomi/mimo-v2.6-pro-ultraspeed",
+  "xiaomi/mimo-v2.6-flash",
+  "deepseek/deepseek-v4.1-flash",
+  "deepseek/deepseek-v4.1-flash-fast",
   "deepseek/deepseek-v4-pro",
-  "deepseek/deepseek-v4-flash",
-  "moonshotai/Kimi-K3",
+  "moonshotai/Kimi-K2.6",
   "moonshotai/Kimi-K2.7-Code",
+  "moonshotai/Kimi-K2.7-Code-Highspeed",
+  "moonshotai/Kimi-K3",
+  "zai-org/GLM-5",
+  "zai-org/GLM-5.1",
   "zai-org/GLM-5.2",
   "zai-org/GLM-5.2-Fast",
+  "zai-org/GLM-5.3",
+  "zai-org/GLM-5.3-Flash",
+  "MiniMaxAI/MiniMax-M2.5",
+  "MiniMaxAI/MiniMax-M2.7",
   "MiniMaxAI/MiniMax-M3",
   "Qwen/Qwen3.6-Plus",
+  "Qwen/Qwen3.6-Max-Preview",
   "Qwen/Qwen3.7-Max",
-  "xiaomi/mimo-v2.5-pro",
-  "poolside/laguna-s-2.1-free",
+  "Qwen/Qwen3.7-Plus",
+  "Qwen/Qwen3.7-Flash",
+  "Qwen/Qwen3.8-Flash",
+  "Qwen/Qwen3.8-Max",
+  "Qwen/Qwen3.8-Max-0902",
+  "Qwen/Qwen3.8-Omni-Flash",
+  "Qwen/Qwen3.8-27B",
+  "stepfun/Step-3.5-Flash",
+  "stepfun/Step-3.7-Flash",
+  "stepfun/Step-5-Preview",
   "nvidia/nemotron-3-ultra-550b-a55b",
+  "poolside/laguna-s-2.1-free",
 ].map((id) =>
   defineModel({ id, providerId: "commandcode", endpoint: "/alpha/generate", vision: true, reasoning: true }),
 );
@@ -61,16 +82,15 @@ export function convertMessages(messages: CanonicalRequest["messages"]): { messa
     // re-homes them). Checking only `role: "tool"` dropped every result from a
     // Messages-origin history, leaving the assistant's `tool_calls` unanswered.
     if (canContainToolResult(message)) {
+      const parts: Array<Record<string, unknown>> = [];
       for (const block of toolResultParts(message)) {
         const content = typeof block.content === "string" ? block.content : JSON.stringify(block.content);
-        out.push({ role: "tool", tool_call_id: block.call_id, content });
+        parts.push({ type: "text", text: `Tool ${block.call_id} result: ${content}` });
       }
-      // Any non-result content on the same turn still follows as a user turn;
-      // a turn that was nothing but results must not emit an empty one.
       const remaining = message.content.filter((part) => part.kind !== "toolResult");
       const remainingText = joinTextParts(remaining);
-      if (message.role === "tool") continue;
-      if (remainingText.length > 0) out.push({ role: "user", content: remainingText });
+      if (remainingText.length > 0) parts.push({ type: "text", text: remainingText });
+      if (parts.length > 0) out.push({ role: "user", content: parts });
       continue;
     }
     if (message.role === "assistant") {
@@ -86,7 +106,7 @@ export function convertMessages(messages: CanonicalRequest["messages"]): { messa
       out.push(msg);
       continue;
     }
-    out.push({ role: "user", content: joinTextParts(message.content) });
+    out.push({ role: "user", content: [{ type: "text", text: joinTextParts(message.content) }] });
   }
   if (system === undefined) return { messages: out };
   return { messages: out, system };
@@ -163,9 +183,36 @@ export function transformLine(line: string, state: StreamState, seqBase: number)
   }
   const type = readString(event, "type");
   if (!type) return [];
-  if (type === "text-delta" || type === "reasoning-delta") {
+  if (type === "reasoning-delta") {
     const text = readString(event, "text") || readString(event, "delta");
-    return text ? [{ type: "content_delta", sequence_number: seqBase, content: { kind: "text", text } } as CanonicalEvent] : [];
+    return text ? [{ type: "content_delta", sequence_number: seqBase, content: { kind: "reasoning", payload: null, summary: text } } as CanonicalEvent] : [];
+  }
+  if (type === "text-delta") {
+    const text = readString(event, "text") || readString(event, "delta");
+    if (!text) return [];
+    // Mimo/MiniMax/Kiro-style XML thinking: <think> or <thinking> inside text-delta.
+    // If thinking tags present, split into reasoning + text.
+    if (text.includes("<think")) {
+      const events: CanonicalEvent[] = [];
+      // naive split: extract <think>...</think> or <thinking>...</thinking>
+      const re = /<think(?:ing)?>([\s\S]*?)<\/think(?:ing)?>/g;
+      let last = 0;
+      let m: RegExpExecArray | null;
+      let hasThink = false;
+      while ((m = re.exec(text)) !== null) {
+        hasThink = true;
+        const before = text.slice(last, m.index);
+        if (before) events.push({ type: "content_delta", sequence_number: seqBase, content: { kind: "text", text: before } } as CanonicalEvent);
+        if (m[1]) events.push({ type: "content_delta", sequence_number: seqBase, content: { kind: "reasoning", payload: null, summary: m[1] } } as CanonicalEvent);
+        last = m.index + m[0].length;
+      }
+      if (hasThink) {
+        const after = text.slice(last);
+        if (after) events.push({ type: "content_delta", sequence_number: seqBase, content: { kind: "text", text: after } } as CanonicalEvent);
+        return events;
+      }
+    }
+    return [{ type: "content_delta", sequence_number: seqBase, content: { kind: "text", text } } as CanonicalEvent];
   }
   if (type === "tool-input-start") {
     const id = readString(event, "id") || readString(event, "toolCallId");
@@ -416,10 +463,8 @@ const upstreamModelId = candidate.model_id || request.model;
 
       yield* transformNdjson(response.body as ReadableStream<Uint8Array>, lifecycle.signal);
     } catch (err: unknown) {
-      if (err instanceof GatewayError) throw err;
-      if (lifecycle.signal.aborted || (err as Error).name === "AbortError") {
-        throw new GatewayError("transport_closed", 499, "request was cancelled");
-      }
+      const abortError = abortGatewayError(lifecycle, err, context.abort_signal);
+      if (abortError) throw abortError;
       throw err;
     } finally {
       lifecycle.release();

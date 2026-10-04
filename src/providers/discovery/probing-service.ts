@@ -32,6 +32,8 @@ import {
   buildProbeCanonicalRequest,
   computeProbeVerdict,
   extractSample,
+  GROK_407_PROBE_PROMPT,
+  grok407ProbeFailure,
   hasMeaningfulOutput,
   loadProbePreferences,
   recordProbeHealth,
@@ -218,6 +220,8 @@ export class ProviderProbingService {
       providerId,
       requestedAccountId: request.accountId,
       requiresAccount,
+      allowCoolingAccount:
+        providerId === "grok" && request.prompt === GROK_407_PROBE_PROMPT,
     });
     if (!account.ok) {
       return { ok: false, latencyMs: Date.now() - startedAt, error: account.error };
@@ -278,11 +282,29 @@ export class ProviderProbingService {
       networkPoolId = outbound.networkPoolId;
       const probeFetch = createProbeFetch(outbound.fetch);
       try {
-        if (serviceKind === "systemone") {
-          // A native-service probe cannot speak the canonical pipeline: its
-          // request is a decision body, not messages, and its answer is
-          // `{answers}`, not events. Dispatch the provider's own native method
-          // and assert the decision shape — mirroring how live traffic reaches
+        if (serviceKind === "websearch") {
+          if (typeof adapter.websearch !== "function") {
+            throw new GatewayError(
+              "capability_unsupported",
+              400,
+              `Provider ${providerId} has no web search transport`,
+            );
+          }
+          const response = await adapter.websearch(
+            { model: modelId, query: "Cartethyia gateway probe", max_results: 2 },
+            candidate,
+            {
+              credential,
+              deadline: startedAt + 30_000,
+              abort_signal: probeSignal,
+              outbound_fetch: probeFetch,
+            },
+          );
+          if (ttfbMs === undefined) ttfbMs = Date.now() - startedAt;
+          if (!response.results || response.results.length === 0) {
+            dispatchError = new GatewayError("platform_unavailable", 502, "web search returned no results");
+          }
+        } else if (serviceKind === "systemone") {
           // the model through the System One route.
           if (typeof adapter.systemone !== "function") {
             throw new GatewayError(
@@ -387,10 +409,21 @@ export class ProviderProbingService {
     } catch (error) {
       dispatchError = error;
     }
+    const featureFailure = grok407ProbeFailure({
+      providerId,
+      prompt: request.prompt,
+      events,
+      dispatchError,
+    });
+    if (featureFailure !== undefined) dispatchError = featureFailure;
 
     const upstreamStatusCode =
-      dispatchError instanceof GatewayError && typeof dispatchError.details.upstreamStatus === "number"
-        ? dispatchError.details.upstreamStatus
+      dispatchError instanceof GatewayError
+        ? typeof dispatchError.details.upstreamStatus === "number"
+          ? dispatchError.details.upstreamStatus
+          : typeof dispatchError.details.providerStatus === "number"
+            ? dispatchError.details.providerStatus
+            : undefined
         : undefined;
     await recordProbeHealth({
       db: this.db,

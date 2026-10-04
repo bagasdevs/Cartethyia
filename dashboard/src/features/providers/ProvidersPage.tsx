@@ -1,4 +1,4 @@
-import { ChevronDown, Eye, EyeOff, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Eye, EyeOff, GripVertical, Plus, Trash2 } from "lucide-react";
 import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -404,36 +404,15 @@ function CustomProviderCard({ customProvider }: { customProvider: ProviderRespon
                   isError={accountsQuery.isError}
                   hasData={false}
                 />
-              ) : counts?.active > 0 ? (
-                <Badge tone="ok" dot>
-                  {counts.active} Healthy
-                </Badge>
-              ) : counts?.disabled > 0 ? (
-                <Badge tone="warn" dot>
-                  {counts.disabled} Unhealthy
-                </Badge>
-              ) : (
+              ) : accounts.length === 0 ? (
                 <Badge>No connections</Badge>
+              ) : (
+                <AccountStatusBadges counts={counts} total={accounts.length} />
               )}
               {accountsQuery.isError && accounts !== undefined ? (
                 <Badge tone="warn">Connections unavailable</Badge>
               ) : null}
-              {counts?.cooldown > 0 ? (
-                <Badge tone="warn" dot>
-                  {counts.cooldown} Cooldown
-                </Badge>
-              ) : null}
-              {counts?.cooling > 0 ? (
-                <Badge tone="warn" dot>
-                  {counts.cooling} Cooling
-                </Badge>
-              ) : null}
-              {counts?.disabled > 0 ? <Badge>Disabled</Badge> : null}
-              {counts?.exhausted > 0 ? (
-                <Badge tone="warn" dot>
-                  {counts.exhausted} Exhausted
-                </Badge>
-              ) : null}
+
             </div>
           </div>
 
@@ -676,10 +655,15 @@ function CustomProvidersSection({
 // ── Provider Card ─────────────────────────────────────────────────────────────
 
 const FOUNDING_IDS = new Set(["inferhub"]);
-/** Free tiers that are metered (a few requests per day) rather than a standing
- * free allowance, so they get their own section instead of the general
- * free-available one. */
-const FREE_LIMITED_IDS = new Set(["cerebras", "bai", "tokenharbor"]);
+/** Free tiers with a small daily allowance rather than a standing free tier. */
+const FREE_LIMITED_IDS = new Set([
+  "cerebras",
+  "bai",
+  "tokenharbor",
+  "grok",
+  "opencodeft",
+  "cline",
+]);
 const FREE_AVAILABLE_IDS = new Set([
   "qoder",
   "agentrouter",
@@ -690,7 +674,6 @@ const FREE_AVAILABLE_IDS = new Set([
   "cbcn",
   "nvidia",
   "hermes",
-  "opencodeft",
   "tokenharbor",
   "bai",
   "gmi",
@@ -714,19 +697,47 @@ const FREE_AVAILABLE_IDS = new Set([
  * one account is not counted as unhealthy merely because it is cooling or in
  * cooldown.
  */
-function summarizeAccounts(accounts: readonly ProviderAccountResponse[]): {
-  active: number;
-  cooldown: number;
-  disabled: number;
-  exhausted: number;
-  cooling: number;
-} {
-  const active = accounts.filter((a) => a.status === "active").length;
-  const cooldown = accounts.filter((a) => a.status === "cooldown").length;
-  const disabled = accounts.filter((a) => a.status === "disabled").length;
-  const exhausted = accounts.filter((a) => a.lastErrorCategory === "quota_exhausted").length;
-  const cooling = modelCoolingCount(accounts);
-  return { active, cooldown, disabled, exhausted, cooling };
+interface AccountStatusCounts {
+  readonly active: number;
+  readonly cooldown: number;
+  readonly disabled: number;
+  readonly exhausted: number;
+  readonly cooling: number;
+}
+
+function summarizeAccounts(accounts: readonly ProviderAccountResponse[]): AccountStatusCounts {
+  return {
+    active: accounts.filter((account) => account.status === "active").length,
+    cooldown: accounts.filter((account) => account.status === "cooldown").length,
+    disabled: accounts.filter((account) => account.status === "disabled").length,
+    exhausted: accounts.filter((account) => account.lastErrorCategory === "quota_exhausted").length,
+    cooling: modelCoolingCount(accounts),
+  };
+}
+
+function AccountStatusBadges({
+  counts,
+  total,
+}: {
+  readonly counts: AccountStatusCounts;
+  readonly total: number;
+}): ReactNode {
+  const hasBadge =
+    counts.active > 0 ||
+    counts.cooldown > 0 ||
+    counts.cooling > 0 ||
+    counts.exhausted > 0 ||
+    counts.disabled > 0;
+  if (!hasBadge) return <Badge tone="warn" dot>{total} Connected</Badge>;
+  return (
+    <>
+      {counts.active > 0 ? <Badge tone="ok" dot>{counts.active} Healthy</Badge> : null}
+      {counts.cooldown > 0 ? <Badge tone="warn" dot>{counts.cooldown} Cooldown</Badge> : null}
+      {counts.cooling > 0 ? <Badge tone="warn" dot>{counts.cooling} Cooling</Badge> : null}
+      {counts.exhausted > 0 ? <Badge tone="warn" dot>{counts.exhausted} Exhausted</Badge> : null}
+      {counts.disabled > 0 ? <Badge tone="warn" dot>{counts.disabled} Unhealthy</Badge> : null}
+    </>
+  );
 }
 
 function SecondaryQueryBadge({
@@ -831,37 +842,13 @@ const ProviderCard = memo(function ProviderCard({
                   isError={accountsQuery.isError}
                   hasData={false}
                 />
-              ) : counts?.active > 0 ? (
-                <Badge tone="ok" dot>
-                  {counts.active} Healthy
-                </Badge>
-              ) : counts?.disabled > 0 ? (
-                <Badge tone="warn" dot>
-                  {counts.disabled} Unhealthy
-                </Badge>
-              ) : (
+              ) : accounts.length === 0 ? (
                 <Badge>No connections</Badge>
+              ) : (
+                <AccountStatusBadges counts={counts} total={accounts.length} />
               )}
               {accountsQuery.isError && accounts !== undefined ? (
                 <Badge tone="warn">Connections unavailable</Badge>
-              ) : null}
-              {counts?.cooldown > 0 ? (
-                <Badge tone="warn" dot>
-                  {counts.cooldown} Cooldown
-                </Badge>
-              ) : null}
-              {/* A per-model throttle keeps the account `active`, so it needs
-                  its own badge: without it the card read as healthy while the
-                  account's detail page reported models cooling. */}
-              {counts?.cooling > 0 ? (
-                <Badge tone="warn" dot>
-                  {counts.cooling} Cooling
-                </Badge>
-              ) : null}
-              {counts?.exhausted > 0 ? (
-                <Badge tone="warn" dot>
-                  {counts.exhausted} Exhausted
-                </Badge>
               ) : null}
             </div>
           </div>
@@ -964,20 +951,66 @@ const SECTIONS = [
 
 export default function Providers(): ReactNode {
   const q = useProviders();
-
   const allProviders = useMemo(() => q.data ?? [], [q.data]);
   const customProviders = useMemo(
     () => [...allProviders.filter((p) => !p.isBuiltIn)].sort(compareConfiguredProviders),
     [allProviders],
   );
   const builtInProviders = useMemo(() => allProviders.filter((p) => p.isBuiltIn), [allProviders]);
-
+  const searchProviders = useMemo(
+    () => builtInProviders.filter((p) => p.providerId === "exa" || p.providerId === "tavily" || p.providerId === "brave"),
+    [builtInProviders],
+  );
+  const llmProviders = useMemo(
+    () => builtInProviders.filter((p) => p.providerId !== "exa" && p.providerId !== "tavily" && p.providerId !== "brave"),
+    [builtInProviders],
+  );
+  const [tab, setTab] = useState<"all" | "llm" | "search">("all");
+  const [sortBy, setSortBy] = useState<"name" | "configured">("name");
+  const [searchOrder, setSearchOrder] = useState<string[] | null>(null);
+  useEffect(() => {
+    // Seed from server preference; fallback to localStorage for immediate UX before first fetch
+    import("../../data/api").then(({ consoleRequest }) =>
+      consoleRequest<{ preferences: { webSearchOrder?: string[] } }>("/settings/runtime").then((r)=>{
+        const o=r.preferences?.webSearchOrder;
+        if(o?.length) setSearchOrder(o as string[]);
+        else { try{ const s=localStorage.getItem("cartethyia:search-order"); if(s) setSearchOrder(JSON.parse(s)); }catch{} }
+      }).catch(()=>{ try{ const s=localStorage.getItem("cartethyia:search-order"); if(s) setSearchOrder(JSON.parse(s)); }catch{} })
+    );
+  }, []);
+  const persistOrder = (ids: string[]) => {
+    setSearchOrder(ids);
+    try{ localStorage.setItem("cartethyia:search-order", JSON.stringify(ids)); }catch{}
+    import("../../data/api").then(({ consoleRequest }) => consoleRequest("/settings/runtime",{method:"PATCH", body: JSON.stringify({ webSearchOrder: ids })}).catch(()=>{}));
+  };
+  const orderedSearch = useMemo(() => {
+    if (!searchOrder) return [...searchProviders].sort((a,b)=>(a.label||a.displayName).localeCompare(b.label||b.displayName));
+    const idx=new Map(searchOrder.map((id,i)=>[id,i] as const));
+    return [...searchProviders].sort((a,b)=>(idx.get(a.providerId)??999)-(idx.get(b.providerId)??999));
+  }, [searchProviders, searchOrder]);
+  const sortFn = (a: ProviderResponse, b: ProviderResponse) => {
+    if (sortBy === "configured") {
+      const diff = Number(Boolean(b.configured)) - Number(Boolean(a.configured));
+      if (diff !== 0) return diff;
+    }
+    return (a.label || a.displayName).localeCompare(b.label || b.displayName);
+  };
   const sections = useMemo(() => {
+    if (tab === "search") {
+      return [
+        {
+          title: "Search Providers",
+          subtitle: "Drag to reorder — top is tried first on POST /v1/search",
+          providers: orderedSearch,
+        },
+      ].filter((s) => s.providers.length > 0);
+    }
+    const source = tab === "llm" ? llmProviders : builtInProviders;
     return SECTIONS.map((section) => ({
       ...section,
-      providers: builtInProviders.filter(section.filter).sort(compareConfiguredProviders),
+      providers: source.filter(section.filter).sort(sortFn),
     })).filter((section) => section.providers.length > 0);
-  }, [builtInProviders]);
+  }, [builtInProviders, llmProviders, orderedSearch, tab, sortBy]);
 
   if (q.isPending && !q.data) return <LoadingState label="Loading providers..." />;
   if (q.isError)
@@ -990,6 +1023,47 @@ export default function Providers(): ReactNode {
 
   return (
     <Stack gap="24px">
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: "4px" }}>
+          {(["all", "llm", "search"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              style={{
+                padding: "6px 12px",
+                borderRadius: "8px",
+                fontSize: "12px",
+                fontWeight: 600,
+                border: tab === t ? "1px solid var(--accent)" : "1px solid var(--inner-border)",
+                background: tab === t ? "var(--accent-soft)" : "var(--surface-1)",
+                color: tab === t ? "var(--accent)" : "var(--text-secondary)",
+                cursor: "pointer",
+              }}
+            >
+              {t === "all" ? "All" : t === "llm" ? "LLM" : "Search"}
+              {t === "search" ? ` (${searchProviders.length})` : t === "llm" ? ` (${llmProviders.length})` : ""}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "6px", marginLeft: "auto" }}>
+          <span style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>Sort</span>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+            style={{
+              fontSize: "12px",
+              padding: "4px 8px",
+              borderRadius: "6px",
+              border: "1px solid var(--inner-border)",
+              background: "var(--surface-1)",
+            }}
+          >
+            <option value="name">Name</option>
+            <option value="configured">Connected</option>
+          </select>
+        </div>
+      </div>
+      
       <CustomProvidersSection customProviders={customProviders} />
 
       {sections.length === 0 ? (
@@ -1015,11 +1089,41 @@ export default function Providers(): ReactNode {
               ) : null}
             </Stack>
 
-            <ProviderCardGrid>
-              {section.providers.map((p) => (
-                <ProviderCard key={p.providerId} provider={p} />
-              ))}
-            </ProviderCardGrid>
+            {tab === "search" ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                {section.providers.map((p, idx) => (
+                  <div
+                    key={p.providerId}
+                    draggable
+                    onDragStart={(e) => { e.dataTransfer.setData("text/plain", p.providerId); e.dataTransfer.effectAllowed="move"; }}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const from=e.dataTransfer.getData("text/plain");
+                      if(!from || from===p.providerId) return;
+                      const ids=orderedSearch.map(x=>x.providerId);
+                      const a=ids.indexOf(from), b=ids.indexOf(p.providerId);
+                      if(a<0||b<0) return;
+                      ids.splice(a,1); ids.splice(b,0,from);
+                      persistOrder(ids);
+                    }}
+                    style={{ display:"flex", alignItems:"stretch", gap:"6px" }}
+                  >
+                    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:"2px", paddingTop:"8px" }}>
+                      <GripVertical size={14} style={{ color:"var(--text-tertiary)", cursor:"grab" }} />
+                      <span style={{ fontSize:"10px", color:"var(--text-tertiary)", fontWeight:700 }}>{idx+1}</span>
+                    </div>
+                    <div style={{ flex:1, minWidth:0 }}><ProviderCard provider={p} /></div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <ProviderCardGrid>
+                {section.providers.map((p) => (
+                  <ProviderCard key={p.providerId} provider={p} />
+                ))}
+              </ProviderCardGrid>
+            )}
           </section>
         ))
       )}
