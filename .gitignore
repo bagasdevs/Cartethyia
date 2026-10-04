@@ -43,6 +43,16 @@ data/
 # duplicate trees.
 .claude/
 
+# Local code-graph index (~400 MB). Excluded via .git/info/exclude only, which
+# `git` honours but `railway up` does not: it archives the working tree and
+# uploads whatever .gitignore omits, so the index blew the upload past the
+# snapshot limit and every deploy failed with "Failed to create code snapshot".
+.gitnexus/
+
+# Temporary git worktrees used for isolated merge drills. Same reasoning as the
+# code-graph index: a full second checkout, never project code.
+.worktrees/
+
 # Backup export dumps written to the repo root during an investigation. A
 # backup carries every provider credential and API-key hash in the clear, so a
 # file left here is a secret leak waiting for `git add -A`. Keep them out of the
