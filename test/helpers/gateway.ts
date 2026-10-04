@@ -360,11 +360,13 @@ export async function createTestGateway(
     // A fixture provider id (`tp-<runId>`) is by construction not bundled, so
     // the dispatch path treats it as a configurable upstream and requires an
     // SSRF-validated host before it will dispatch — it resolves the hostname
-    // for real, which is why this must be a name that actually resolves rather
-    // than a documentation-only `.test` domain. `localhost` resolves to
-    // loopback, which the policy above permits, so the pre-dispatch validation
-    // runs its real code path without touching the network.
-    byokUpstreamHosts: { get: () => ({ hostname: "localhost", port: 443 }) },
+    // for real. The host must therefore be an IP literal: `resolveAllAddresses`
+    // only skips DNS for a literal (`isIP`), and `localhost` is a hosts-file
+    // entry that `dns.resolve4` cannot answer (ENODATA), which failed every
+    // dispatching suite with `transport_unavailable: upstream DNS resolution
+    // failed` before it reached its stub. Loopback is permitted by the policy
+    // above, so the real validation path still runs without touching the network.
+    byokUpstreamHosts: { get: () => ({ hostname: "127.0.0.1", port: 443 }) },
     networkBindingFactory,
     ipAbuseProtection,
     trustedProxyBoundary: TEST_TRUSTED_PROXY_BOUNDARY,

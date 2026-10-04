@@ -81,7 +81,15 @@ export async function createProvider(
       providerId,
       options.tenantId ?? null,
       options.wireFamily ?? "chat",
-      options.baseUrl ?? "https://upstream.test",
+      // Must be an IP literal, not a hostname: the dispatch path SSRF-validates
+      // a configurable upstream's host before handing the request to the
+      // adapter, and `resolveAllAddresses` only skips DNS for a literal
+      // (`isIP(hostname)`). `.test` is a reserved TLD that never resolves and
+      // `localhost` is a hosts-file entry that `dns.resolve4` cannot answer
+      // (ENODATA), so both died with `transport_unavailable: upstream DNS
+      // resolution failed` before reaching the stub. Loopback is permitted by
+      // the test policy's `allowPrivate`, and the stub never opens a socket.
+      options.baseUrl ?? "https://127.0.0.1",
       options.enabled ?? true,
       options.requiresAccount ?? true,
     ],
