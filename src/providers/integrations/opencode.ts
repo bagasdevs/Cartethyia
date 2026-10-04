@@ -5,7 +5,6 @@ import { isRecord } from "../../protocol/primitives";
 import { PROVIDER_COMPATIBILITY_PROFILES } from "../provider-metadata";
 import { defineModel } from "../model-definition";
 import type { ApiKeyProviderSpec } from "./configured-provider";
-import { resolveOpenCodeVersion } from "../operations/client-versions";
 import { buildOpenCodeHeaders } from "./opencode-fingerprint";
 /**
  * OpenCode's three API-key tiers, all served from `opencode.ai`:
@@ -85,9 +84,9 @@ export function isFreeTierZenModel(modelId: string): boolean {
 }
 
 async function opencodeDesktopHeaders(context?: ProviderDispatchContext): Promise<Record<string, string>> {
-  // Await discovery so the true latest client version is stamped on every
-  // dispatch; the pinned fallback only applies on a real network failure.
-  await resolveOpenCodeVersion();
+  // Session affinity comes from the dispatch context; the request id still
+  // rotates inside buildOpenCodeHeaders. The version is no longer awaited here:
+  // the background client-version monitor keeps it fresh off the dispatch path.
   return buildOpenCodeHeaders(undefined, context?.conversation_affinity);
 }
 /** Canonical agent-tool fingerprint OpenCode Free requires on every dispatch.
