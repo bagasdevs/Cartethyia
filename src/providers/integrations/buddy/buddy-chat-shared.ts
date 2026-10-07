@@ -511,6 +511,13 @@ export function finalizeBuddyMessages(
  * instructions, AGENTS.md rules, tool contracts) while leaving only the
  * fixed persona — an agent that silently runs without its instructions.
  *
+ * UNVERIFIED: upstream shipped the same idea as `7fd290e` and reverted it in
+ * `bc49e0e` after CodeBuddy answered `400 · 11128` on every request. That
+ * reverted shape *substituted* caller text for the prompt, while this one
+ * keeps the prompt first and appends, so the revert is not proof against this
+ * shape — but the append has not been re-tested against the live endpoint.
+ * If buddy accounts start parking on `11128`, suspect this append first.
+ *
  * Tool call/output pairing is intentionally NOT handled here: the shared
  * canonical repair (`repairRequestToolCalls`, request/preparer) owns it for
  * every route, so this stays a system-prompt and content-shape hook.

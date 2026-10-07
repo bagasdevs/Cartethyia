@@ -38,13 +38,14 @@ export const WORKBUDDY_BASE_URL = providerBaseUrl("workbuddy");
 /**
  * Leading system turn for this variant.
  *
- * The upstream does validate the leading system turn's *text*, not just that
- * the wire opens with one: sending caller text in its place answers
- * `400 · 11128 "Illegal API invocation from an unapproved channel"` on
- * CodeBuddy, which treats that prompt as the calling channel's identity. So
- * this prompt is a wire contract, not merely a product choice — see the
- * sibling in `codebuddy.ts`. The previous line named the vendor product, which
- * made every request claim an identity the caller never chose.
+ * The upstream validates that the wire *opens* with a `system` turn, not that
+ * the text matches this constant — the sibling in `codebuddy.ts` records the
+ * same finding for the identical string. What it does reject is *replacing*
+ * this prompt with caller text outright: doing that answers
+ * `400 · 11128 "Illegal API invocation from an unapproved channel"`, because
+ * the leading prompt reads as the calling channel's identity. So appending
+ * caller text behind this prompt is a different wire shape from substituting
+ * it, and only the substitution is known to fail — see `applyBuddySystemPrompt`.
  */
 export const WORKBUDDY_SYSTEM_PROMPT =
   "You are a pragmatic and direct software engineering assistant. " +
