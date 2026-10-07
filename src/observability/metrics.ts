@@ -1,8 +1,8 @@
 /**
  * Hand-rolled Prometheus text-format registry (Requirement: no new dependency).
- * A module-level singleton (`metrics`) mirrors the existing `getDb`/`getRedis`
- * singleton pattern. Callers obtain pre-registered families as named
- * properties; `render()` emits the Prometheus exposition format on demand.
+ * A module-level singleton (`metrics`) mirrors the existing `getDb` singleton
+ * pattern. Callers obtain pre-registered families as named properties;
+ * `render()` emits the Prometheus exposition format on demand.
  */
 
 export type MetricLabels = Readonly<Record<string, string | number>>;
@@ -264,7 +264,6 @@ export class PrometheusRegistry {
   readonly proxy_provider_adapter_load_ms: HistogramMetric;
   readonly pool_cooldown_record_failed: CounterMetric;
   readonly quota_cache_invalidate_failed: CounterMetric;
-  readonly version_discovery_failed: CounterMetric;
 
   private readonly all: RenderableMetric[] = [];
 
@@ -358,11 +357,6 @@ export class PrometheusRegistry {
     this.quota_cache_invalidate_failed = this.counter(
       "quota_cache_invalidate_failed",
       "Quota cache invalidations that failed",
-    );
-    this.version_discovery_failed = this.counter(
-      "version_discovery_failed",
-      "Client version discoveries that failed, leaving the pinned fallback in use",
-      ["provider"],
     );
   }
 

@@ -1,11 +1,12 @@
 import { consoleErrorHandler } from "../../shared/errors";
 import { literalUnion } from "../../shared/elysia-schema";
 import { Elysia, t } from "elysia";
-import { WIRE_FAMILIES } from "../../../transport/canonical-model";
+import { SERVICE_KINDS, WIRE_FAMILIES } from "../../../transport/canonical-model";
 import { PROBE_REASONING_EFFORTS } from "../../../providers/discovery/discovery-types";
 import {
   ACCOUNT_STATUSES,
   CREDENTIAL_KINDS,
+  CREDENTIAL_MODES,
 } from "./contracts";
 import { createModelCatalogOperations } from "./model-operations";
 import {
@@ -68,6 +69,7 @@ const updateProviderBody = t.Partial(
 const createAccountBody = t.Object({
   label: t.Optional(t.String()),
   credentialKind: literalUnion(CREDENTIAL_KINDS),
+  credentialMode: t.Optional(literalUnion(CREDENTIAL_MODES)),
   secret: t.String(),
   authState: t.Optional(t.Record(t.String(), t.Unknown())),
 });
@@ -83,6 +85,7 @@ const registerModelsBody = t.Object({
 });
 const probeModelBody = t.Object({
   modelId: t.String(),
+  serviceKind: t.Optional(literalUnion(SERVICE_KINDS)),
   route: t.Optional(t.String()),
   wireFamily: t.Optional(t.String()),
   accountId: t.Optional(t.String()),

@@ -1,4 +1,4 @@
-import { ChevronDown, Eye, EyeOff, GripVertical, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Eye, EyeOff, Plus, Trash2 } from "lucide-react";
 import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -38,6 +38,15 @@ import { getErrorMessage } from "../../shared/helpers";
 
 const wireFamilies = ["chat", "responses", "messages"] as const;
 type WireFamily = (typeof wireFamilies)[number];
+type DashboardServiceKind = "llm" | "websearch";
+
+const SEARCH_PROVIDER_ORDER = ["exa", "gemini", "codex"] as const;
+
+function providerServiceKinds(provider: ProviderResponse): readonly string[] {
+  const kinds = provider.serviceKinds;
+  return Array.isArray(kinds) && kinds.length > 0 ? kinds : ["llm"];
+}
+
 
 // ── Custom Compatible Provider Modal ──────────────────────────────────────────
 
@@ -353,9 +362,9 @@ function CustomProviderCard({ customProvider }: { customProvider: ProviderRespon
   // only shows when every account is active and healthy.
   return (
     <Card
+      className="provider-card provider-card-custom"
       style={{
         position: "relative",
-        overflow: "hidden",
         display: "flex",
         flexDirection: "column",
         border: "1px solid var(--inner-border)",
@@ -364,6 +373,7 @@ function CustomProviderCard({ customProvider }: { customProvider: ProviderRespon
           "transform var(--dur-micro) var(--ease-spring), border-color var(--dur-micro) var(--ease-spring), box-shadow var(--dur-micro) var(--ease-spring)",
       }}
     >
+      <ProviderVersionBadge clientVersion={customProvider.clientVersion} />
       <Link
         to={`/providers/${encodeURIComponent(customProvider.providerId)}`}
         style={{
@@ -496,8 +506,7 @@ function CustomProviderCard({ customProvider }: { customProvider: ProviderRespon
               Cancel
             </Button>
             <Button
-              variant="primary"
-              style={{ background: "var(--red)", borderColor: "var(--red)" }}
+              variant="danger"
               onClick={() => {
                 deleteMutation.mutate(customProvider.providerId, {
                   onSuccess: () => setDeleteOpen(false),
@@ -657,27 +666,28 @@ function CustomProvidersSection({
 const FOUNDING_IDS = new Set(["inferhub"]);
 /** Free tiers with a small daily allowance rather than a standing free tier. */
 const FREE_LIMITED_IDS = new Set([
-  "cerebras",
-  "bai",
-  "tokenharbor",
   "grok",
   "opencodeft",
   "cline",
 ]);
-const FREE_AVAILABLE_IDS = new Set([
-  "qoder",
-  "agentrouter",
-  "mistral",
-  "gemini",
-  "openrouter",
-  "cb",
-  "cbcn",
-  "nvidia",
+/**
+ * The providers an operator reaches for first: household names with a
+ * published API-key signup. Grouped so the long tail of compatible resellers
+ * below does not bury the ones everybody has already heard of. `ollama` is
+ * registered as `ollamacloud`.
+ */
+const WELL_KNOWN_API_KEY_IDS = new Set([
+  "commandcode",
   "hermes",
-  "tokenharbor",
-  "bai",
-  "gmi",
-  "aihubmix",
+  "anthropic",
+  "openai",
+  "gemini",
+  "ollamacloud",
+  "opencodezen",
+  "opencodego",
+  "mistral",
+  "meta",
+  "deepseek",
 ]);
 
 /**
@@ -756,24 +766,52 @@ function SecondaryQueryBadge({
   return null;
 }
 
+function ProviderVersionBadge({
+  clientVersion,
+}: {
+  readonly clientVersion: ProviderResponse["clientVersion"];
+}): ReactNode {
+  if (!clientVersion) return null;
+  return (
+    <Badge
+      className="provider-version-badge"
+      tone={clientVersion.source === "latest" ? "teal" : "default"}
+      title={
+        clientVersion.source === "latest"
+          ? "Latest discovered client version"
+          : "Pinned fallback; background discovery has not succeeded yet"
+      }
+    >
+      v{clientVersion.version} · {clientVersion.source}
+    </Badge>
+  );
+}
+
 const ProviderCard = memo(function ProviderCard({
   provider,
+  serviceKind,
 }: {
   provider: ProviderResponse;
+  serviceKind?: DashboardServiceKind;
 }): ReactNode {
   const isFounding = FOUNDING_IDS.has(provider.providerId.toLowerCase());
   const displayName = provider.label || provider.displayName;
   const modelsQuery = useProviderModels(provider.providerId);
-  const modelCount = modelsQuery.data?.length;
+  const modelCount = modelsQuery.data?.filter(
+    (model) =>
+      serviceKind === undefined ||
+      model.serviceKind === serviceKind ||
+      (serviceKind === "llm" && model.serviceKind === undefined),
+  ).length;
   const accountsQuery = useProviderAccounts(provider.providerId);
   const accounts = accountsQuery.data;
   const counts = summarizeAccounts(accounts ?? []);
 
   return (
     <Card
+      className="provider-card"
       style={{
         position: "relative",
-        overflow: "hidden",
         display: "flex",
         flexDirection: "column",
         border: "1px solid var(--inner-border)",
@@ -781,29 +819,50 @@ const ProviderCard = memo(function ProviderCard({
         transition: "transform var(--dur-micro) var(--ease-spring), border-color var(--dur-micro) var(--ease-spring), box-shadow var(--dur-micro) var(--ease-spring)",
       }}
     >
+      <ProviderVersionBadge clientVersion={provider.clientVersion} />
       {isFounding ? (
-        <div
+        <span
+          aria-label="Friend sponsor"
+          title="Friend sponsor"
           style={{
             position: "absolute",
-            right: "-24px",
-            top: "10px",
-            transform: "rotate(45deg)",
-            background: "var(--accent)",
-            color: "var(--accent-foreground)",
-            fontSize: "9px",
-            fontWeight: 800,
-            padding: "2px 24px",
-            textTransform: "uppercase",
-            letterSpacing: "0.08em",
-            zIndex: 5,
+            top: 0,
+            right: 0,
+            zIndex: 2,
+            width: "72px",
+            height: "72px",
+            overflow: "hidden",
+            pointerEvents: "none",
           }}
         >
-          Friend
-        </div>
+          <span
+            style={{
+              position: "absolute",
+              top: "18px",
+              right: "-22px",
+              width: "76px",
+              padding: "2px 0",
+              transform: "rotate(45deg)",
+              background: "var(--accent-soft)",
+              color: "var(--accent)",
+              fontSize: "9px",
+              fontWeight: 800,
+              letterSpacing: "0.04em",
+              lineHeight: 1.05,
+              textAlign: "center",
+              textTransform: "uppercase",
+              boxShadow: "0 1px 3px rgba(0, 0, 0, 0.12)",
+            }}
+          >
+            Friend
+          </span>
+        </span>
       ) : null}
 
       <Link
-        to={`/providers/${encodeURIComponent(provider.providerId)}`}
+        to={`/providers/${encodeURIComponent(provider.providerId)}${
+          serviceKind === undefined ? "" : `?service=${serviceKind}`
+        }`}
         style={{
           textDecoration: "none",
           color: "inherit",
@@ -871,18 +930,6 @@ const ProviderCard = memo(function ProviderCard({
             >
               {provider.providerId}/
             </span>
-            {provider.clientVersion ? (
-              <Badge
-                tone={provider.clientVersion.source === "latest" ? "teal" : "default"}
-                title={
-                  provider.clientVersion.source === "latest"
-                    ? "Latest discovered client version"
-                    : "Pinned fallback; background discovery has not succeeded yet"
-                }
-              >
-                v{provider.clientVersion.version} · {provider.clientVersion.source}
-              </Badge>
-            ) : null}
             {modelCount !== undefined && modelCount > 0 ? (
               <Badge tone="info">{modelCount} models</Badge>
             ) : null}
@@ -935,22 +982,27 @@ const SECTIONS = [
     // `oauthFlows` is present on a provider response exactly when the registry
     // resolves a login client for it, so this section cannot drift from the
     // providers that really support a login flow.
-    filter: (p: ProviderResponse) => p.oauthFlows !== undefined,
+    filter: (p: ProviderResponse) =>
+      p.oauthFlows !== undefined && !FREE_LIMITED_IDS.has(p.providerId.toLowerCase()),
   },
   {
-    title: "Free Available API Key Providers",
-    subtitle: "Free tier friendly — no credit card",
+    title: "Well Known API Key Providers",
+    subtitle: "The household names — sign up with a key and go",
     filter: (p: ProviderResponse) =>
-      FREE_AVAILABLE_IDS.has(p.providerId.toLowerCase()) &&
+      p.isBuiltIn &&
+      WELL_KNOWN_API_KEY_IDS.has(p.providerId.toLowerCase()) &&
+      !FOUNDING_IDS.has(p.providerId.toLowerCase()) &&
       !FREE_LIMITED_IDS.has(p.providerId.toLowerCase()) &&
       p.oauthFlows === undefined,
   },
   {
-    title: "API Key Providers",
+    title: "Other API Key Providers",
+    subtitle: "Free tier friendly — no credit card",
     filter: (p: ProviderResponse) =>
       p.isBuiltIn &&
+      !WELL_KNOWN_API_KEY_IDS.has(p.providerId.toLowerCase()) &&
       !FOUNDING_IDS.has(p.providerId.toLowerCase()) &&
-      !FREE_AVAILABLE_IDS.has(p.providerId.toLowerCase()) &&
+      !FREE_LIMITED_IDS.has(p.providerId.toLowerCase()) &&
       p.oauthFlows === undefined,
   },
 ];
@@ -964,43 +1016,28 @@ export default function Providers(): ReactNode {
     () => [...allProviders.filter((p) => !p.isBuiltIn)].sort(compareConfiguredProviders),
     [allProviders],
   );
-  const builtInProviders = useMemo(() => allProviders.filter((p) => p.isBuiltIn), [allProviders]);
   const searchProviders = useMemo(
-    () => builtInProviders.filter((p) => p.providerId === "exa" || p.providerId === "tavily" || p.providerId === "brave"),
-    [builtInProviders],
+    () => allProviders.filter((p) => providerServiceKinds(p).includes("websearch")),
+    [allProviders],
   );
   const llmProviders = useMemo(
-    () => builtInProviders.filter((p) => p.providerId !== "exa" && p.providerId !== "tavily" && p.providerId !== "brave"),
-    [builtInProviders],
+    () => allProviders.filter((p) => providerServiceKinds(p).includes("llm")),
+    [allProviders],
   );
-  const [tab, setTab] = useState<"all" | "llm" | "search">("all");
-  const [sortBy, setSortBy] = useState<"name" | "configured">("name");
-  const [searchOrder, setSearchOrder] = useState<string[] | null>(null);
-  useEffect(() => {
-    // Seed from server preference; fallback to localStorage for immediate UX before first fetch
-    import("../../data/api").then(({ consoleRequest }) =>
-      consoleRequest<{ preferences: { webSearchOrder?: string[] } }>("/settings/runtime").then((r)=>{
-        const o=r.preferences?.webSearchOrder;
-        if(o?.length) setSearchOrder(o as string[]);
-        else { try{ const s=localStorage.getItem("cartethyia:search-order"); if(s) setSearchOrder(JSON.parse(s)); }catch{} }
-      }).catch(()=>{ try{ const s=localStorage.getItem("cartethyia:search-order"); if(s) setSearchOrder(JSON.parse(s)); }catch{} })
-    );
-  }, []);
-  const persistOrder = (ids: string[]) => {
-    setSearchOrder(ids);
-    try{ localStorage.setItem("cartethyia:search-order", JSON.stringify(ids)); }catch{}
-    import("../../data/api").then(({ consoleRequest }) => consoleRequest("/settings/runtime",{method:"PATCH", body: JSON.stringify({ webSearchOrder: ids })}).catch(()=>{}));
-  };
+  const [tab, setTab] = useState<"llm" | "search">("llm");
   const orderedSearch = useMemo(() => {
-    if (!searchOrder) return [...searchProviders].sort((a,b)=>(a.label||a.displayName).localeCompare(b.label||b.displayName));
-    const idx=new Map(searchOrder.map((id,i)=>[id,i] as const));
-    return [...searchProviders].sort((a,b)=>(idx.get(a.providerId)??999)-(idx.get(b.providerId)??999));
-  }, [searchProviders, searchOrder]);
+    const rank = new Map<string, number>(SEARCH_PROVIDER_ORDER.map((id, index) => [id, index]));
+    return [...searchProviders].sort((a, b) => {
+      const rankDiff =
+        (rank.get(a.providerId.toLowerCase()) ?? SEARCH_PROVIDER_ORDER.length) -
+        (rank.get(b.providerId.toLowerCase()) ?? SEARCH_PROVIDER_ORDER.length);
+      if (rankDiff !== 0) return rankDiff;
+      return (a.label || a.displayName).localeCompare(b.label || b.displayName);
+    });
+  }, [searchProviders]);
   const sortFn = (a: ProviderResponse, b: ProviderResponse) => {
-    if (sortBy === "configured") {
-      const diff = Number(Boolean(b.configured)) - Number(Boolean(a.configured));
-      if (diff !== 0) return diff;
-    }
+    const configuredDiff = Number(Boolean(b.configured)) - Number(Boolean(a.configured));
+    if (configuredDiff !== 0) return configuredDiff;
     return (a.label || a.displayName).localeCompare(b.label || b.displayName);
   };
   const sections = useMemo(() => {
@@ -1008,17 +1045,17 @@ export default function Providers(): ReactNode {
       return [
         {
           title: "Search Providers",
-          subtitle: "Drag to reorder — top is tried first on POST /v1/search",
+          subtitle: "Automatic web search order: Exa → Gemini → Codex",
           providers: orderedSearch,
         },
       ].filter((s) => s.providers.length > 0);
     }
-    const source = tab === "llm" ? llmProviders : builtInProviders;
+    const source = llmProviders;
     return SECTIONS.map((section) => ({
       ...section,
       providers: source.filter(section.filter).sort(sortFn),
     })).filter((section) => section.providers.length > 0);
-  }, [builtInProviders, llmProviders, orderedSearch, tab, sortBy]);
+  }, [llmProviders, orderedSearch, tab]);
 
   if (q.isPending && !q.data) return <LoadingState label="Loading providers..." />;
   if (q.isError)
@@ -1033,7 +1070,7 @@ export default function Providers(): ReactNode {
     <Stack gap="24px">
       <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
         <div style={{ display: "flex", gap: "4px" }}>
-          {(["all", "llm", "search"] as const).map((t) => (
+          {(["llm", "search"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -1048,31 +1085,25 @@ export default function Providers(): ReactNode {
                 cursor: "pointer",
               }}
             >
-              {t === "all" ? "All" : t === "llm" ? "LLM" : "Search"}
-              {t === "search" ? ` (${searchProviders.length})` : t === "llm" ? ` (${llmProviders.length})` : ""}
+              {t === "llm" ? "LLM" : "Search"}
+              {t === "search" ? ` (${searchProviders.length})` : ` (${llmProviders.length})`}
             </button>
           ))}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "6px", marginLeft: "auto" }}>
-          <span style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>Sort</span>
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-            style={{
-              fontSize: "12px",
-              padding: "4px 8px",
-              borderRadius: "6px",
-              border: "1px solid var(--inner-border)",
-              background: "var(--surface-1)",
-            }}
-          >
-            <option value="name">Name</option>
-            <option value="configured">Connected</option>
-          </select>
-        </div>
+        <span
+          style={{
+            marginLeft: "auto",
+            fontSize: "10.5px",
+            color: "var(--text-tertiary)",
+          }}
+        >
+          {tab === "search" ? "Automatic order: Exa → Gemini → Codex" : "Connected pinned first · A–Z"}
+        </span>
       </div>
       
-      <CustomProvidersSection customProviders={customProviders} />
+      {tab === "llm" ? (
+        <CustomProvidersSection customProviders={customProviders} />
+      ) : null}
 
       {sections.length === 0 ? (
         <Card>
@@ -1097,41 +1128,15 @@ export default function Providers(): ReactNode {
               ) : null}
             </Stack>
 
-            {tab === "search" ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                {section.providers.map((p, idx) => (
-                  <div
-                    key={p.providerId}
-                    draggable
-                    onDragStart={(e) => { e.dataTransfer.setData("text/plain", p.providerId); e.dataTransfer.effectAllowed="move"; }}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      const from=e.dataTransfer.getData("text/plain");
-                      if(!from || from===p.providerId) return;
-                      const ids=orderedSearch.map(x=>x.providerId);
-                      const a=ids.indexOf(from), b=ids.indexOf(p.providerId);
-                      if(a<0||b<0) return;
-                      ids.splice(a,1); ids.splice(b,0,from);
-                      persistOrder(ids);
-                    }}
-                    style={{ display:"flex", alignItems:"stretch", gap:"6px" }}
-                  >
-                    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:"2px", paddingTop:"8px" }}>
-                      <GripVertical size={14} style={{ color:"var(--text-tertiary)", cursor:"grab" }} />
-                      <span style={{ fontSize:"10px", color:"var(--text-tertiary)", fontWeight:700 }}>{idx+1}</span>
-                    </div>
-                    <div style={{ flex:1, minWidth:0 }}><ProviderCard provider={p} /></div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <ProviderCardGrid>
-                {section.providers.map((p) => (
-                  <ProviderCard key={p.providerId} provider={p} />
-                ))}
-              </ProviderCardGrid>
-            )}
+            <ProviderCardGrid>
+              {section.providers.map((p) => (
+                <ProviderCard
+                  key={p.providerId}
+                  provider={p}
+                  serviceKind={tab === "search" ? "websearch" : "llm"}
+                />
+              ))}
+            </ProviderCardGrid>
           </section>
         ))
       )}

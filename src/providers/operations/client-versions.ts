@@ -8,10 +8,13 @@
 import {
   createClientVersionResolver,
   isSemverish,
-  type ClientVersionFetcher,
   type ClientVersionResolver,
   type ClientVersionSnapshot,
 } from "./client-version-resolver";
+import {
+  buildGrokAuthUserAgent as buildGrokAuthUserAgentString,
+  buildGrokShellUserAgent,
+} from "./cli-platform";
 
 async function qoderVersion(response: Response): Promise<string | null> {
   try {
@@ -53,12 +56,49 @@ async function workbuddyDesktopVersion(response: Response): Promise<string | nul
   }
 }
 
+async function codeBuddyCnVersion(response: Response): Promise<string | null> {
+  try {
+    const data = (await response.json()) as { version?: unknown };
+    if (typeof data.version !== "string") return null;
+    const match = /^\d+\.\d+\.\d+\.\d+/.exec(data.version.trim());
+    return match?.[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function kiroVersion(response: Response): Promise<string | null> {
   const body = await response.text();
   const version =
     /currentVersion["\\]*\s*:\s*["\\]*([\d.]+)/.exec(body)?.[1] ??
     /\bIDE\s+([\d.]+)[^<]*Latest/.exec(body)?.[1];
   return isSemverish(version) ? version : null;
+}
+
+async function antigravityVersion(response: Response): Promise<string | null> {
+  const body = await response.text();
+  for (const line of body.split(/\r?\n/)) {
+    const match = /^\s*version\s*:\s*(?:"([^"]*)"|'([^']*)'|([^\s#]+))\s*(?:#.*)?$/.exec(line);
+    if (!match) continue;
+    const version = (match[1] ?? match[2] ?? match[3] ?? "").trim();
+    return isSemverish(version) ? version : null;
+  }
+  return null;
+}
+/**
+ * GitHub release tag (`v3.14.3` → `3.14.3`). Tags carry the leading `v`
+ * by convention while the gateway stamps bare versions, so the prefix is
+ * stripped rather than rejected by the semver check.
+ */
+async function githubReleaseVersion(response: Response): Promise<string | null> {
+  try {
+    const data = (await response.json()) as { tag_name?: unknown; name?: unknown };
+    const raw = data.tag_name ?? data.name;
+    const candidate = typeof raw === "string" && raw.startsWith("v") ? raw.slice(1) : raw;
+    return isSemverish(candidate) ? (candidate as string).trim() : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -116,6 +156,16 @@ const KIRO_NODE_VERSION = "24.18.0";
 
 /** Ordered upstream sources and pinned fallbacks for every client version. */
 export const VERSION_SOURCES = {
+  antigravity: {
+    key: "antigravity",
+    fallback: "2.19.1",
+    sources: [
+      {
+        url: "https://antigravity-hub-auto-updater-974169037036.us-central1.run.app/manifest/latest-arm64-mac.yml",
+        extract: antigravityVersion,
+      },
+    ],
+  },
   qoder: {
     key: "qoder",
     fallback: "1.1.65",
@@ -128,17 +178,17 @@ export const VERSION_SOURCES = {
   },
   opencode: {
     key: "opencode",
-    fallback: "1.18.33",
+    fallback: "1.18.34",
     sources: [{ url: "https://registry.npmjs.org/opencode-ai/latest" }],
   },
   commandcode: {
     key: "commandcode",
-    fallback: "1.73.0",
+    fallback: "1.74.1",
     sources: [{ url: "https://registry.npmjs.org/command-code/latest" }],
   },
   grok: {
     key: "grok",
-    fallback: "1.0.44",
+    fallback: "1.0.46",
     sources: [
       { url: "https://storage.googleapis.com/grok-build-public-artifacts/cli/stable" },
       { url: "https://registry.npmjs.org/@xai-official/grok/latest" },
@@ -157,12 +207,12 @@ export const VERSION_SOURCES = {
   },
   clineSdk: {
     key: "cline-sdk",
-    fallback: "0.0.88",
+    fallback: "0.0.90",
     sources: [{ url: "https://registry.npmjs.org/@cline/sdk/latest", extract: clineSdkVersion }],
   },
   codex: {
     key: "codex",
-    fallback: "0.159.2",
+    fallback: "0.160.0",
     sources: [{ url: "https://registry.npmjs.org/@openai/codex/latest" }],
   },
   workbuddyClient: {
@@ -181,7 +231,7 @@ export const VERSION_SOURCES = {
   },
   workbuddyCli: {
     key: "workbuddy",
-    fallback: "2.161.0",
+    fallback: "2.161.2",
     sources: [
       { url: "https://registry.npmjs.org/@tencent-ai/codebuddy-code/latest" },
       { url: "https://registry.npmmirror.com/@tencent-ai/codebuddy-code/latest" },
@@ -199,10 +249,22 @@ export const VERSION_SOURCES = {
   },
   codebuddy: {
     key: "codebuddy",
-    fallback: "2.161.0",
+    fallback: "2.161.2",
     sources: [
       { url: "https://registry.npmjs.org/@tencent-ai/codebuddy-code/latest" },
       { url: "https://registry.npmmirror.com/@tencent-ai/codebuddy-code/latest" },
+    ],
+  },
+  codebuddyCn: {
+    key: "codebuddy-cn",
+    fallback: "4.12.1.39217423",
+    sources: [
+      {
+        // Official CN builds are listed by Homebrew's maintained cask feed;
+        // its version points at the current Tencent CN desktop artifact.
+        url: "https://formulae.brew.sh/api/cask/codebuddy-cn.json",
+        extract: codeBuddyCnVersion,
+      },
     ],
   },
   claudeCli: {
@@ -210,7 +272,7 @@ export const VERSION_SOURCES = {
     // Current `@anthropic-ai/claude-code` release, so the billing
     // `cc_version=` suffix and the `claude-cli/` User-Agent stay on what
     // upstream ships.
-    fallback: "2.1.286",
+    fallback: "2.1.289",
     sources: [{ url: "https://registry.npmjs.org/@anthropic-ai/claude-code/latest" }],
   },
   claudeSdk: {
@@ -225,9 +287,54 @@ export const VERSION_SOURCES = {
     fallback: "0.127.0",
     sources: [],
   },
+  devin: {
+    key: "devin",
+    // Tracks the Devin VS Code extension line. The pinned floor is the
+    // in-repo extension version: discovery moves forward only, so an
+    // upstream feed lagging behind can never silently downgrade the badge.
+    fallback: "1.49.2",
+    minVersion: "1.49.2",
+    sources: [{ url: "https://open-vsx.org/api/Codeium/codeium" }],
+  },
+  github: {
+    key: "github-copilot-chat",
+    fallback: "0.43.0",
+    sources: [
+      {
+        url: "https://api.github.com/repos/microsoft/vscode-copilot-chat/releases/latest",
+        extract: githubReleaseVersion,
+      },
+    ],
+  },
+  kilo: {
+    key: "kilo-code",
+    fallback: "7.8.3",
+    sources: [{ url: "https://open-vsx.org/api/kilocode/kilo-code" }],
+  },
+  mimo: {
+    key: "mimo-cli",
+    fallback: "0.1.15",
+    sources: [{ url: "https://registry.npmjs.org/@mimo-ai/cli/latest" }],
+  },
+  muse: {
+    key: "muse-code",
+    fallback: "1.4.2-R4684.1",
+    sources: [{ url: "https://api.meta.ai/muse-code/channels/muse-stable" }],
+  },
+  zcode: {
+    key: "zcode",
+    fallback: "3.14.3",
+    sources: [
+      {
+        url: "https://api.github.com/repos/zai-org/ZCode/releases/latest",
+        extract: githubReleaseVersion,
+      },
+    ],
+  },
 } as const;
 
 const resolvers = {
+  antigravity: createClientVersionResolver(VERSION_SOURCES.antigravity),
   qoder: createClientVersionResolver(VERSION_SOURCES.qoder),
   opencode: createClientVersionResolver(VERSION_SOURCES.opencode),
   commandcode: createClientVersionResolver(VERSION_SOURCES.commandcode),
@@ -239,12 +346,21 @@ const resolvers = {
   workbuddyCli: createClientVersionResolver(VERSION_SOURCES.workbuddyCli),
   kimiCli: createClientVersionResolver(VERSION_SOURCES.kimiCli),
   codebuddy: createClientVersionResolver(VERSION_SOURCES.codebuddy),
+  codebuddyCn: createClientVersionResolver(VERSION_SOURCES.codebuddyCn),
   claudeCli: createClientVersionResolver(VERSION_SOURCES.claudeCli),
   claudeSdk: createClientVersionResolver(VERSION_SOURCES.claudeSdk),
   kiro: createClientVersionResolver(VERSION_SOURCES.kiro),
+  devin: createClientVersionResolver(VERSION_SOURCES.devin),
+  github: createClientVersionResolver(VERSION_SOURCES.github),
+  kilo: createClientVersionResolver(VERSION_SOURCES.kilo),
+  mimo: createClientVersionResolver(VERSION_SOURCES.mimo),
+  muse: createClientVersionResolver(VERSION_SOURCES.muse),
+  zcode: createClientVersionResolver(VERSION_SOURCES.zcode),
 } satisfies Record<keyof typeof VERSION_SOURCES, ClientVersionResolver>;
 const PROVIDER_VERSION_RESOLVERS: Readonly<Record<string, ClientVersionResolver>> = {
+  antigravity: resolvers.antigravity,
   grok: resolvers.grok,
+  xai: resolvers.grok,
   opencode: resolvers.opencode,
   opencodeft: resolvers.opencode,
   opencodezen: resolvers.opencode,
@@ -255,11 +371,17 @@ const PROVIDER_VERSION_RESOLVERS: Readonly<Record<string, ClientVersionResolver>
   commandcode: resolvers.commandcode,
   workbuddy: resolvers.workbuddyClient,
   cb: resolvers.codebuddy,
-  cbcn: resolvers.codebuddy,
+  cbcn: resolvers.codebuddyCn,
   kimi: resolvers.kimiCli,
   kiro: resolvers.kiro,
   anthropic: resolvers.claudeCli,
   claude: resolvers.claudeCli,
+  devin: resolvers.devin,
+  github: resolvers.github,
+  kilo: resolvers.kilo,
+  mimodesktop: resolvers.mimo,
+  muse: resolvers.muse,
+  zcode: resolvers.zcode,
 };
 
 /** Returns the current client version without performing network I/O. */
@@ -276,32 +398,17 @@ export async function refreshProviderClientVersions(): Promise<void> {
 /**
  * The accessors every table entry needs, generated from its resolver.
  *
- * Each entry used to ship a hand-written `getX` / `resolveX` / `refreshX` /
- * `_resetX` quadruple that all did exactly this — four bodies per entry, which
- * is how a new entry could forget one or drift on which resolver it reads.
- * `accessor(name)` is the one place the shape is decided.
- *
- * A named export is still declared beside the table when callers read better
- * with it (`getCodexVersion`), or when the accessor seeds more than one
- * resolver (`_resetClaudeVersionCache`). Both are one line against a resolver,
- * not a second implementation.
+ * Request paths only use the synchronous getter. Network discovery belongs to
+ * `refreshProviderClientVersions`, so dispatch and OAuth flows never wait on a
+ * version endpoint.
  */
 function accessor<K extends keyof typeof resolvers>(name: K): {
   readonly get: () => string;
-  readonly resolve: (fetcher?: typeof fetch, signal?: AbortSignal) => Promise<string>;
-  readonly refresh: (fetcher?: typeof fetch) => void;
   readonly reset: (version?: string | null) => void;
 } {
   const resolver = resolvers[name];
   return {
     get: () => resolver.get(),
-    resolve: async (fetcher?: typeof fetch, signal?: AbortSignal) => {
-      await resolver.ensure(fetcher, signal);
-      return resolver.get();
-    },
-    refresh: (fetcher?: typeof fetch) => {
-      resolver.refresh(fetcher);
-    },
     reset: (version?: string | null) => {
       resolver.reset(version);
     },
@@ -309,56 +416,38 @@ function accessor<K extends keyof typeof resolvers>(name: K): {
 }
 
 export const getQoderVersion = accessor("qoder").get;
-export const resolveQoderVersion = accessor("qoder").resolve;
 export const _resetQoderVersion = accessor("qoder").reset;
+export const getAntigravityVersion = accessor("antigravity").get;
+export const _resetAntigravityVersion = accessor("antigravity").reset;
 
 export const getOpenCodeVersion = accessor("opencode").get;
-export const resolveOpenCodeVersion = accessor("opencode").resolve;
-export const refreshOpenCodeVersion = accessor("opencode").refresh;
 export const _resetOpenCodeVersion = accessor("opencode").reset;
 
 export const getCommandCodeVersion = accessor("commandcode").get;
-export const resolveCommandCodeVersion = accessor("commandcode").resolve;
 export const _resetCommandCodeVersion = accessor("commandcode").reset;
 
 export const getGrokVersion = accessor("grok").get;
-export const resolveGrokVersion = accessor("grok").resolve;
-export const refreshGrokVersion = accessor("grok").refresh;
+export const _resetGrokVersionCache = accessor("grok").reset;
 
 export function buildGrokUserAgent(version = getGrokVersion()): string {
-  return `grok-shell/${version} (linux; x86_64)`;
+  return buildGrokShellUserAgent(version);
 }
 
 export function buildGrokAuthUserAgent(version = getGrokVersion()): string {
-  return `grok-pager/${version} grok-shell/${version} (linux; x86_64)`;
+  return buildGrokAuthUserAgentString(version);
 }
 
-export const _resetGrokVersionCache = accessor("grok").reset;
 
 export const getClineClientVersion = accessor("clineClient").get;
 export const getClineSdkVersion = accessor("clineSdk").get;
-export const resolveClineClientVersion = accessor("clineClient").resolve;
-export const resolveClineSdkVersion = accessor("clineSdk").resolve;
-export const refreshClineClientVersion = accessor("clineClient").refresh;
 
-export const resolveWorkBuddyClientVersion = accessor("workbuddyClient").resolve;
 export const _resetWorkBuddyClientVersionCache = accessor("workbuddyClient").reset;
 
 export const getCodexVersion = accessor("codex").get;
-export const resolveCodexVersion = accessor("codex").resolve;
-export const refreshCodexVersion = accessor("codex").refresh;
 export const _resetCodexVersion = accessor("codex").reset;
 
 export const getWorkBuddyClientVersion = accessor("workbuddyClient").get;
 export const getWorkBuddyCliVersion = accessor("workbuddyCli").get;
-
-export async function resolveWorkBuddyVersion(fetcher?: typeof fetch, signal?: AbortSignal): Promise<string> {
-  await Promise.all([
-    resolvers.workbuddyClient.ensure(fetcher, signal),
-    resolvers.workbuddyCli.ensure(fetcher, signal),
-  ]);
-  return getWorkBuddyCliVersion();
-}
 
 export function buildWorkBuddyUserAgent(
   clientVersion = getWorkBuddyClientVersion(),
@@ -370,26 +459,22 @@ export function buildWorkBuddyUserAgent(
 export const _resetWorkBuddyVersionCache = accessor("workbuddyCli").reset;
 
 export const getKimiCliVersion = accessor("kimiCli").get;
-export const resolveKimiCliVersion = accessor("kimiCli").resolve;
-export const refreshKimiCliVersion = accessor("kimiCli").refresh;
 export const _resetKimiCliVersion = accessor("kimiCli").reset;
 
 export const getCodeBuddyVersion = accessor("codebuddy").get;
-export const resolveCodeBuddyVersion = accessor("codebuddy").resolve;
-
+export const getCodeBuddyCnVersion = accessor("codebuddyCn").get;
 export function buildCodeBuddyUserAgent(
   identity: "IDE" | "CLI",
-  version = getCodeBuddyVersion(),
+  version = identity === "CLI" ? getCodeBuddyCnVersion() : getCodeBuddyVersion(),
 ): string {
   return `${identity}/${version} CodeBuddy/${version}`;
 }
 
 export const _resetCodeBuddyVersionCache = accessor("codebuddy").reset;
+export const _resetCodeBuddyCnVersionCache = accessor("codebuddyCn").reset;
 
 export const getClaudeCliVersion = accessor("claudeCli").get;
-export const resolveClaudeCliVersion = accessor("claudeCli").resolve;
 export const getClaudeSdkVersion = accessor("claudeSdk").get;
-export const resolveClaudeSdkVersion = accessor("claudeSdk").resolve;
 
 export function _resetClaudeVersionCache(version: string | null = null): void {
   resolvers.claudeCli.reset(version);
@@ -397,12 +482,6 @@ export function _resetClaudeVersionCache(version: string | null = null): void {
 }
 
 export const getKiroVersion = accessor("kiro").get;
-// Kiro's callers pass its own `FetchLike` (a narrower fetch surface), so the
-// generated signature is widened here rather than at the factory.
-export const resolveKiroVersion = accessor("kiro").resolve as (
-  fetcher?: ClientVersionFetcher,
-  signal?: AbortSignal,
-) => Promise<string>;
 export const _resetKiroVersion = accessor("kiro").reset;
 
 /**

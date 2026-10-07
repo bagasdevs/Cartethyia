@@ -70,6 +70,8 @@ import {
 
 /** Max models probed concurrently per batch (outside the sequential warm-up). */
 const PROBE_CONCURRENCY = 5;
+/** Max accounts probed concurrently; batches wait before starting the next ten. */
+const PROBE_ACCOUNT_CONCURRENCY = 10;
 
 export interface ProbeOutboundBinding {
   readonly fetch: ValidatedOutboundFetch;
@@ -271,10 +273,11 @@ export class ProviderProbingService {
     const events: CanonicalEvent[] = [];
     let ttfbMs: number | undefined;
     let dispatchError: unknown;
+    /** Hits a `websearch` probe returned; surfaced to the console verbatim. */
+    let searchResults: ProbeModelResult["searchResults"];
     let networkPoolId: string | undefined;
     try {
       // Public providers (`requires_account: false`) probe credential-free;
-      // anything else resolves the health-filtered account selected above.
       const credential = accountId
         ? await resolveCredentialForAccount(this.db, providerId, accountId)
         : { provider_id: parsedProviderId, credential_kind: "none" as const };
@@ -290,8 +293,9 @@ export class ProviderProbingService {
               `Provider ${providerId} has no web search transport`,
             );
           }
+          const searchProbeQuery = request.prompt?.trim() || "Cartethyia gateway probe";
           const response = await adapter.websearch(
-            { model: modelId, query: "Cartethyia gateway probe", max_results: 2 },
+            { model: modelId, query: searchProbeQuery, max_results: 3 },
             candidate,
             {
               credential,
@@ -301,11 +305,15 @@ export class ProviderProbingService {
             },
           );
           if (ttfbMs === undefined) ttfbMs = Date.now() - startedAt;
+          searchResults = response.results.map((hit) => ({
+            title: hit.title,
+            url: hit.url,
+            snippet: hit.snippet,
+          }));
           if (!response.results || response.results.length === 0) {
             dispatchError = new GatewayError("platform_unavailable", 502, "web search returned no results");
           }
         } else if (serviceKind === "systemone") {
-          // the model through the System One route.
           if (typeof adapter.systemone !== "function") {
             throw new GatewayError(
               "capability_unsupported",
@@ -437,17 +445,22 @@ export class ProviderProbingService {
     const latencyMs = Date.now() - startedAt;
     // A native-service probe carries no canonical events: its verdict is the
     // decision response itself (no dispatch error + answers present), which the
-    // branch above already encoded into `dispatchError`.
+    // branch above already encoded into `dispatchError`. Web search is a
+    // native service too — routing it through the LLM verdict demanded a
+    // `terminal` event the search transport never emits, so a search that
+    // returned hits was reported as a failure with an empty message.
     const { ok, errorMessage, usage } =
-      serviceKind === "systemone"
+      serviceKind === "systemone" || serviceKind === "websearch"
         ? {
             ok: dispatchError === undefined,
             errorMessage:
               dispatchError === undefined
                 ? undefined
-                : dispatchError instanceof Error
-                  ? dispatchError.message
-                  : String(dispatchError),
+                : dispatchError instanceof GatewayError
+                  ? `Search provider ${providerId}/${modelId} — ${dispatchError.message} (HTTP ${dispatchError.status})`
+                  : dispatchError instanceof Error
+                    ? `${providerId}/${modelId} — ${dispatchError.message}`
+                    : String(dispatchError),
             usage: undefined,
           }
         : computeProbeVerdict({
@@ -509,6 +522,7 @@ export class ProviderProbingService {
       ...(ttfbMs !== undefined ? { ttfbMs } : {}),
       ...(upstreamStatusCode === undefined ? {} : { statusCode: upstreamStatusCode }),
       ...(sample ? { sample } : {}),
+      ...(searchResults !== undefined && searchResults.length > 0 ? { searchResults } : {}),
       ...(errorMessage ? { error: errorMessage } : {}),
     };
   }
@@ -770,7 +784,6 @@ export class ProviderProbingService {
         modalities: knownDefinition?.modalities ?? discDef?.modalities ?? null,
         reasoning: knownDefinition?.reasoning ?? discDef?.reasoning ?? false,
         toolCall: knownDefinition?.toolCall ?? discDef?.toolCall ?? false,
-        webSearch: knownDefinition?.webSearch ?? discDef?.webSearch ?? false,
         cost: modelsDevCatalog.costFor(providerId, modelId),
       };
       rows.push({
@@ -808,7 +821,6 @@ export class ProviderProbingService {
             modalities: sql`excluded.modalities`,
             reasoning: sql`excluded.reasoning`,
             toolCall: sql`excluded.tool_call`,
-            webSearch: sql`excluded.web_search`,
             cost: sql`excluded.cost`,
             // The proposed row's own source, not a constant: a free-tier
             // discovery and an ordinary one write the same upsert, and pinning
@@ -891,34 +903,35 @@ export class ProviderProbingService {
   }
 
   /**
-   * Batched provider-wide probe: `modelIds[0]` runs sequentially (it warms
+   * Batched provider-wide probe: the first request runs sequentially (it warms
    * OAuth token caches and connection pools for the provider), the rest run
-   * with `Promise.allSettled` bounded to `PROBE_CONCURRENCY`. Any per-model
-   * failure is captured in its own result entry; the batch never rejects.
+   * with `Promise.allSettled` bounded to `PROBE_CONCURRENCY`. Each request
+   * carries its model route and service kind so native services never fall
+   * through to an LLM probe.
    */
   async probeAllModels(
     tenantId: string,
     providerId: string,
-    modelIds: readonly string[],
+    requests: readonly ProbeModelRequest[],
   ): Promise<ProbeAllModelsResult> {
     const results: Array<ProbeAllModelsResult["results"][number]> = [];
-    const [firstModelId, ...restModelIds] = modelIds;
-    if (firstModelId === undefined) return { providerId, results };
+    const [firstRequest, ...restRequests] = requests;
+    if (firstRequest === undefined) return { providerId, results };
 
-    const runOne = async (modelId: string): Promise<void> => {
-      const outcome = await this.probeModel(tenantId, providerId, { modelId });
+    const runOne = async (probeRequest: ProbeModelRequest): Promise<void> => {
+      const outcome = await this.probeModel(tenantId, providerId, probeRequest);
       results.push({
-        modelId,
+        modelId: probeRequest.modelId,
         ok: outcome.ok,
         latencyMs: outcome.latencyMs,
         ...(outcome.error ? { error: outcome.error } : {}),
       });
     };
 
-    await runOne(firstModelId);
-    for (let offset = 0; offset < restModelIds.length; offset += PROBE_CONCURRENCY) {
-      const batch = restModelIds.slice(offset, offset + PROBE_CONCURRENCY);
-      await Promise.allSettled(batch.map((modelId) => runOne(modelId)));
+    await runOne(firstRequest);
+    for (let offset = 0; offset < restRequests.length; offset += PROBE_CONCURRENCY) {
+      const batch = restRequests.slice(offset, offset + PROBE_CONCURRENCY);
+      await Promise.allSettled(batch.map((request) => runOne(request)));
     }
     return { providerId, results };
   }
@@ -936,19 +949,24 @@ export class ProviderProbingService {
           or(isNull(providerAccounts.tenantId), eq(providerAccounts.tenantId, tenantId)),
         ),
       );
-    const results = await Promise.all(
-      accounts.map(async (account) => {
-        const result = await this.probeModel(tenantId, providerId, {
-          ...request,
-          accountId: account.id,
-        });
-        // No health write here: this used to regex the model's own answer text
-        // for "202" and degrade the account on a match. A probe that genuinely
-        // fails already reports through `recordAccountFailure`, which classifies
-        // the real status; matching answer text is not a health signal.
-        return { ...result, accountId: account.id };
-      }),
-    );
+    const results: ProbeAllAccountsResult["results"][number][] = [];
+    for (let offset = 0; offset < accounts.length; offset += PROBE_ACCOUNT_CONCURRENCY) {
+      const batch = accounts.slice(offset, offset + PROBE_ACCOUNT_CONCURRENCY);
+      const batchResults = await Promise.all(
+        batch.map(async (account) => {
+          const result = await this.probeModel(tenantId, providerId, {
+            ...request,
+            accountId: account.id,
+          });
+          // No health write here: this used to regex the model's own answer text
+          // for "202" and degrade the account on a match. A probe that genuinely
+          // fails already reports through `recordAccountFailure`, which classifies
+          // the real status; matching answer text is not a health signal.
+          return { ...result, accountId: account.id };
+        }),
+      );
+      results.push(...batchResults);
+    }
     return { providerId, modelId: request.modelId, results };
   }
 }

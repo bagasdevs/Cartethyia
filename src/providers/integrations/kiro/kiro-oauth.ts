@@ -23,6 +23,7 @@
  *    separately rather than through the shared token parser.
  */
 import {
+  decodeJwtPayload,
   devicePollBackoff,
   nonEmptyString,
   nonEmptyTrimmedString,
@@ -50,7 +51,6 @@ import {
   buildKiroSsoUserAgent,
   buildKiroUserAgent,
   getKiroVersion,
-  resolveKiroVersion,
 } from "../../operations/client-versions";
 import { deriveApiKeyMachineId, deriveOAuthMachineId, normalizeMachineId } from "./kiro-machine-id";
 
@@ -259,24 +259,9 @@ export function validateMicrosoftTokenEndpoint(raw: unknown): string {
   return parsed.toString();
 }
 
-/** Decodes a JWT payload without verifying it, for the account label only. */
-export function decodeJwtPayload(jwt: string | undefined): Record<string, unknown> | undefined {
-  if (jwt === undefined) return undefined;
-  const parts = jwt.split(".");
-  if (parts.length !== 3) return undefined;
-  const base64 = (parts[1] ?? "").replace(/-/g, "+").replace(/_/g, "/");
-  const padding = (4 - (base64.length % 4)) % 4;
-  try {
-    const decoded = JSON.parse(Buffer.from(`${base64}${"=".repeat(padding)}`, "base64").toString("utf8")) as unknown;
-    return record(decoded);
-  } catch {
-    return undefined;
-  }
-}
-
 /** Best-effort display label for a credential. */
 export function kiroAccountLabel(accessToken: string | undefined): string | undefined {
-  const payload = decodeJwtPayload(accessToken);
+  const payload = accessToken === undefined ? undefined : decodeJwtPayload(accessToken);
   if (payload === undefined) return undefined;
   for (const key of ["email", "preferred_username", "upn", "sub"]) {
     const value = nonEmptyTrimmedString(payload[key]);
@@ -826,7 +811,7 @@ export class KiroOAuthClient extends OAuthDeviceFlow {
     const trimmed = apiKey.trim();
     if (trimmed.length === 0) throw new Error("API key is required");
     const safeRegion = assertAwsRegion(normalizeRegion(region));
-    const version = await resolveKiroVersion(this.fetchFn);
+    const version = getKiroVersion();
     const machineId = deriveApiKeyMachineId(trimmed);
     const response = await this.fetchFn(
       `https://q.${safeRegion}.amazonaws.com/ListAvailableModels?origin=AI_EDITOR`,

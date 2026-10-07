@@ -224,7 +224,7 @@ const TOP_N = 50;
 export class DrizzleObservabilityStore implements ObservabilityStore {
   constructor(
     private readonly db: CartethyiaDatabase,
-    private readonly redis: RedisClient,
+    private readonly redis: RedisClient | undefined,
     /**
      * Tenant preferences, revision-cached. The Usage page reads the privacy
      * gate on the list, detail and breakdown paths, so a direct SELECT here
@@ -288,11 +288,14 @@ export class DrizzleObservabilityStore implements ObservabilityStore {
       databaseHealthy = false;
     }
 
-    let redisHealthy = false;
-    try {
-      redisHealthy = (await this.redis.ping()) === "PONG";
-    } catch {
-      redisHealthy = false;
+    // No client means the memory backend, which is healthy by construction.
+    let redisHealthy = this.redis === undefined;
+    if (this.redis !== undefined) {
+      try {
+        redisHealthy = (await this.redis.ping()) === "PONG";
+      } catch {
+        redisHealthy = false;
+      }
     }
 
     const status: SystemHealthResponse["status"] = !databaseHealthy
