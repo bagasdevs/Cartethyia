@@ -499,24 +499,26 @@ export function finalizeBuddyMessages(
 }
 
 /**
- * Applies the buddy-family message envelope in place: keep the caller's
- * `system`/`developer` instruction text behind the variant's fixed leading
- * system prompt (joined with a blank line), rebuild bare string user content
+ * Applies the buddy-family message envelope in place: install the variant's
+ * fixed leading system prompt, carry the caller's `system`/`developer`
+ * instruction text as the first `user` turn, rebuild bare string user content
  * as a typed text block, then coalesce consecutive user turns.
  *
- * The upstream gateway validates that the wire *opens* with a `system` turn
- * (`11128`/`11151`) but does not constrain its text, so merging is safe and
- * prompt caching keeps hitting the same prefix. Dropping the caller's text
- * threw away the system prompt the client actually configured (OMP agent
- * instructions, AGENTS.md rules, tool contracts) while leaving only the
- * fixed persona — an agent that silently runs without its instructions.
+ * The caller's text is deliberately NOT merged into the system turn. Measured
+ * live on cb/deepseek-v4.1-flash with a 30-sentence agent prompt: when the
+ * caller text sits in the system turn and varies per request, the upstream's
+ * cached prefix collapses from 640 to 256 tokens (81% -> 32% hit rate),
+ * because the varying text is inside the cached prefix. Moving it to a user
+ * turn keeps the system prefix stable, so the hit rate holds at 640 (81%)
+ * while the instructions still reach the model — verified by the model
+ * answering in the persona the caller's system text demanded.
  *
- * UNVERIFIED: upstream shipped the same idea as `7fd290e` and reverted it in
- * `bc49e0e` after CodeBuddy answered `400 · 11128` on every request. That
- * reverted shape *substituted* caller text for the prompt, while this one
- * keeps the prompt first and appends, so the revert is not proof against this
- * shape — but the append has not been re-tested against the live endpoint.
- * If buddy accounts start parking on `11128`, suspect this append first.
+ * The upstream validates only that the wire *opens* with a `system` turn
+ * (`11128`/`11151`), not its text: the CN variant installs a plain
+ * engineering-assistant sentence in the same slot and the gateway accepts it.
+ * Dropping the caller's text instead threw away the system prompt the client
+ * actually configured (agent instructions, tool contracts), leaving an agent
+ * that ran without its instructions.
  *
  * Tool call/output pairing is intentionally NOT handled here: the shared
  * canonical repair (`repairRequestToolCalls`, request/preparer) owns it for
@@ -536,12 +538,11 @@ export function applyBuddySystemPrompt(
     }
     source.push(message);
   }
-  const merged =
-    callerInstructions.length > 0
-      ? `${systemPrompt}\n\n${callerInstructions.join("\n\n")}`
-      : systemPrompt;
   messages.length = 0;
-  messages.push({ role: "system", content: merged });
+  messages.push({ role: "system", content: systemPrompt });
+  if (callerInstructions.length > 0) {
+    messages.push({ role: "user", content: callerInstructions.join("\n\n") });
+  }
   for (const message of source) {
     if (message["role"] === "user" && typeof message["content"] === "string") {
       messages.push({

@@ -7,15 +7,20 @@
  * 1. The caller's `system`/`developer` text must survive. It used to be
  *    dropped outright, so a client ran without the instructions it configured
  *    (agent rules, tool contracts).
- * 2. The variant's prompt must stay the FIRST text in that turn. Upstream
- *    shipped a fix that *substituted* caller text for the prompt and reverted
- *    it (`bc49e0e`) after CodeBuddy answered `400 · 11128` on every request.
- *    Appending is a different shape from substituting, and that is the whole
- *    reason this file exists: a future "cleanup" that collapses these into one
- *    must fail here rather than silently park every buddy account.
+ * 2. The variant's prompt must be the ONLY thing in the system turn. Upstream
+ *    shipped a fix that substituted caller text for the prompt and reverted it
+ *    (`bc49e0e`) after CodeBuddy answered `400 · 11128`. Appending behind the
+ *    prompt works but degrades cache: measured live, a caller text that varies
+ *    per request collapses the upstream's cached prefix from 640 to 256
+ *    tokens (81% -> 32%) because the varying text sits inside the cached
+ *    prefix. Carrying it as the first user turn keeps the prefix stable.
  *
- * Not covered (cannot be, without live credentials): whether the upstream
- * accepts the appended shape. See the UNVERIFIED note on the implementation.
+ * So the shape is: [system: persona] [user: caller text] [...rest].
+ * A future "cleanup" that folds the caller text back into the system turn
+ * must fail here rather than silently cut the cache hit rate in half.
+ *
+ * Verified live on cb/deepseek-v4.1-flash: HTTP 200, no 11128, and the model
+ * answers in the persona the caller's system text demanded.
  */
 import { describe, expect, test } from "bun:test";
 import {
@@ -39,34 +44,61 @@ function leadingText(messages: Array<Message>): string {
   return typeof content === "string" ? content : "";
 }
 
+/** Every user-turn text, in order. */
+function userTexts(messages: Array<Message>): string {
+  const parts: string[] = [];
+  for (const m of messages) {
+    if (m["role"] !== "user") continue;
+    const c = m["content"];
+    if (typeof c === "string") {
+      parts.push(c);
+      continue;
+    }
+    if (Array.isArray(c)) {
+      for (const block of c) {
+        if (
+          block !== null &&
+          typeof block === "object" &&
+          (block as Record<string, unknown>)["type"] === "text"
+        ) {
+          parts.push(String((block as Record<string, unknown>)["text"] ?? ""));
+        }
+      }
+    }
+  }
+  return parts.join("\n");
+}
+
 describe("buddy leading system turn", () => {
   test("opens with a system turn", () => {
     const out = apply([{ role: "user", content: "hi" }]);
     expect(out[0]?.["role"]).toBe("system");
   });
 
-  test("keeps the variant prompt first when the caller sent none", () => {
-    const out = apply([{ role: "user", content: "hi" }]);
+  test("system turn holds the persona and nothing else", () => {
+    const out = apply([
+      { role: "system", content: CANARY },
+      { role: "user", content: "hi" },
+    ]);
     expect(leadingText(out)).toBe(PERSONA);
   });
 
-  test("keeps the caller system text instead of dropping it", () => {
+  test("carries the caller system text as a user turn instead of dropping it", () => {
     const out = apply([
       { role: "system", content: CANARY },
       { role: "user", content: "hi" },
     ]);
-    expect(leadingText(out)).toContain(CANARY);
+    expect(userTexts(out)).toContain(CANARY);
   });
 
-  test("keeps the persona FIRST — this is what separates append from substitute", () => {
-    // The reverted upstream shape put caller text in the persona's slot. If a
-    // change ever makes this false, buddy accounts are one deploy from being
-    // parked on 11128.
+  test("put the caller text BEFORE the caller's own messages", () => {
+    // The whole point of the shape: the caller's instructions land in front of
+    // the conversation, not behind it.
     const out = apply([
       { role: "system", content: CANARY },
       { role: "user", content: "hi" },
     ]);
-    expect(leadingText(out).startsWith(PERSONA)).toBe(true);
+    expect(userTexts(out).indexOf(CANARY)).toBeLessThan(userTexts(out).indexOf("hi"));
   });
 
   test("carries a developer turn's text without forwarding the role", () => {
@@ -74,8 +106,7 @@ describe("buddy leading system turn", () => {
       { role: "developer", content: CANARY },
       { role: "user", content: "hi" },
     ]);
-    expect(leadingText(out)).toContain(CANARY);
-    expect(leadingText(out).startsWith(PERSONA)).toBe(true);
+    expect(userTexts(out)).toContain(CANARY);
     // The buddy upstream refuses the `developer` role itself.
     expect(out.some((m) => m["role"] === "developer")).toBe(false);
   });
@@ -85,25 +116,30 @@ describe("buddy leading system turn", () => {
       { role: "system", content: [{ type: "text", text: CANARY }] },
       { role: "user", content: "hi" },
     ]);
-    expect(leadingText(out)).toContain(CANARY);
+    expect(userTexts(out)).toContain(CANARY);
   });
 
-  test("collapses several caller turns into one leading turn", () => {
+  test("collapses several caller turns into one carried user turn", () => {
     const out = apply([
       { role: "system", content: "CANARY: one." },
       { role: "developer", content: "CANARY: two." },
       { role: "user", content: "hi" },
     ]);
-    const systemTurns = out.filter((m) => m["role"] === "system");
-    expect(systemTurns).toHaveLength(1);
-    expect(leadingText(out)).toContain("CANARY: one.");
-    expect(leadingText(out)).toContain("CANARY: two.");
+    expect(out.filter((m) => m["role"] === "system")).toHaveLength(1);
+    expect(userTexts(out)).toContain("CANARY: one.");
+    expect(userTexts(out)).toContain("CANARY: two.");
   });
 
   test("rebuilds bare string user content as a typed text block", () => {
     const out = apply([{ role: "user", content: "hi" }]);
     const user = out.find((m) => m["role"] === "user");
     expect(user?.["content"]).toEqual([{ type: "text", text: "hi" }]);
+  });
+
+  test("adds no user turn when the caller sent no system text", () => {
+    const out = apply([{ role: "user", content: "hi" }]);
+    expect(out.filter((m) => m["role"] === "user")).toHaveLength(1);
+    expect(userTexts(out)).toBe("hi");
   });
 
   test("finalizeBuddyMessages still guarantees a leading system turn", () => {

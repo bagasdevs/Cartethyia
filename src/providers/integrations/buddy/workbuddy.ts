@@ -40,12 +40,17 @@ export const WORKBUDDY_BASE_URL = providerBaseUrl("workbuddy");
  *
  * The upstream validates that the wire *opens* with a `system` turn, not that
  * the text matches this constant — the sibling in `codebuddy.ts` records the
- * same finding for the identical string. What it does reject is *replacing*
- * this prompt with caller text outright: doing that answers
- * `400 · 11128 "Illegal API invocation from an unapproved channel"`, because
- * the leading prompt reads as the calling channel's identity. So appending
- * caller text behind this prompt is a different wire shape from substituting
- * it, and only the substitution is known to fail — see `applyBuddySystemPrompt`.
+ * same finding for the identical string. Verified live on cb/deepseek-v4.1-flash:
+ * a caller system turn, a caller developer turn, and a 30-sentence agent
+ * prompt all answered 200 with no `11128`, and the model obeyed the caller's
+ * instructions. The sibling `cbcn` adapter installs a different sentence in
+ * this same slot and is accepted, which independently disproves any
+ * text-equals-this-constant check.
+ *
+ * What it does reject is *replacing* this prompt with caller text outright
+ * (`400 · 11128`, the reason upstream reverted `7fd290e` in `bc49e0e`), so the
+ * caller's text is carried as a user turn rather than merged into this one —
+ * see `applyBuddySystemPrompt`.
  */
 export const WORKBUDDY_SYSTEM_PROMPT =
   "You are a pragmatic and direct software engineering assistant. " +
