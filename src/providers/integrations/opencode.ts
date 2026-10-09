@@ -142,7 +142,7 @@ function opencodeSpec(providerId: "opencodeft" | "opencodezen" | "opencodego"): 
     // The agent fingerprint is per *model*, not per provider: upstream gates the
     // free-tier ids on the shared `/zen/v1` base, so a `-free` id dispatched
     // through `opencodezen` is refused exactly like one through `opencodeft`.
-    // Without this hook on Zen, its own catalog rows (`nemotron-3-ultra-free`,
+    // Without this hook on Zen, its own catalog rows (`nemotron-3.5-lightning-free`,
     // `muse-spark-1.2-contributor-free`, …) could only ever answer 403.
     ...(providerId === "opencodego"
       ? {}
@@ -176,42 +176,85 @@ export const OPENCODE_ZEN_SPEC: ApiKeyProviderSpec = opencodeSpec("opencodezen")
 export const OPENCODE_GO_SPEC: ApiKeyProviderSpec = opencodeSpec("opencodego");
 
 /**
- * The free-tier subset of `/zen/v1/models`, as this provider's own discovery.
+ * One `/zen/v1/models` read, classified.
  *
- * The listing is the shared Zen catalog and states no tier: it returns all 81
- * ids, most of which are billed and not routable without a credential. This
- * provider serves the free tier only, so the listing is filtered to that tier
- * and every surviving row is marked `freeTier`, which is what the model list
- * groups as "Free models (auto)".
+ * Both Zen tiers publish the same catalog and state no tier field, so the free
+ * tier is read from the id convention the provider itself uses
+ * (`isFreeTierZenModel`) and marked `freeTier` — the flag the model list groups
+ * as "Free models (auto)". A System One id is reclassified onto its native
+ * decision endpoint here, so no caller can hand the chat surface a decision
+ * model.
  *
  * The rows are the fetcher's own definitions, spread rather than rebuilt: it has
  * already resolved limits, pricing, and the wire family from the id (a
  * Responses-native id lands on `responses`, not pinned to chat), and
  * re-deriving that here would discard the resolution and let the two drift.
  */
-export async function discoverOpenCodeFreeModels(options: {
+async function classifyZenModels(options: {
   readonly baseUrl: string;
+  readonly providerId: "opencodeft" | "opencodezen";
+  readonly headers?: Readonly<Record<string, string>>;
   readonly fetcher?: typeof fetch;
 }): Promise<readonly ModelDefinition[] | null> {
   const { fetchOpenAICompatibleModels } = await import("../discovery/openai-model-discovery");
   const listed = await fetchOpenAICompatibleModels({
     baseUrl: options.baseUrl,
+    providerId: options.providerId,
+    ...(options.headers === undefined ? {} : { headers: options.headers }),
+    ...(options.fetcher === undefined ? {} : { fetcher: options.fetcher }),
+  });
+  if (listed === null) return null;
+  return listed.map((model) => ({
+    ...model,
+    ...(isFreeTierZenModel(model.modelId) ? { freeTier: true } : {}),
+    ...(isSystemoneZenModel(model.modelId)
+      ? { serviceKind: "systemone" as const, endpointPath: `${ZEN_PATH_PREFIX}/systemone` }
+      : {}),
+  }));
+}
+
+/**
+ * The free-tier subset of `/zen/v1/models`, as OpenCode Free's discovery.
+ *
+ * The listing is the shared Zen catalog and states no tier: this provider
+ * serves the free tier only, so the listing is filtered to that tier and every
+ * surviving row is marked `freeTier`, which is what the model list groups as
+ * "Free models (auto)".
+ */
+export async function discoverOpenCodeFreeModels(options: {
+  readonly baseUrl: string;
+  readonly fetcher?: typeof fetch;
+}): Promise<readonly ModelDefinition[] | null> {
+  const listed = await classifyZenModels({
+    baseUrl: options.baseUrl,
     providerId: "opencodeft",
     ...(options.fetcher === undefined ? {} : { fetcher: options.fetcher }),
   });
   if (listed === null) return null;
-  return listed
-    .filter((model) => isFreeTierZenModel(model.modelId))
-    .map((model) => ({
-      ...model,
-      freeTier: true,
-      // A System One id survives the free-tier filter (it carries the `-free`
-      // suffix) but is not a chat model: reclassify it onto the native decision
-      // endpoint so the chat surface never sees it.
-      ...(isSystemoneZenModel(model.modelId)
-        ? { serviceKind: "systemone" as const, endpointPath: `${ZEN_PATH_PREFIX}/systemone` }
-        : {}),
-    }));
+  return listed.filter((model) => model.freeTier === true);
+}
+
+/**
+ * The whole `/zen/v1/models` catalog, as OpenCode Zen's discovery.
+ *
+ * Zen serves the billed roster and the free tier from the same base, so the
+ * listing is returned whole: free rows carry `freeTier` and group as "Free
+ * models (auto)", while billed ones stay ordinary discovered rows. The read
+ * carries the account's credential because the endpoint answers
+ * credential-filtered — a bearer request lists the ids that credential reaches,
+ * an anonymous one the full catalog — and Zen's own roster is the filtered one.
+ */
+export async function discoverOpenCodeZenModels(options: {
+  readonly baseUrl: string;
+  readonly credential: string;
+  readonly fetcher?: typeof fetch;
+}): Promise<readonly ModelDefinition[] | null> {
+  return classifyZenModels({
+    baseUrl: options.baseUrl,
+    providerId: "opencodezen",
+    headers: { authorization: `Bearer ${options.credential}` },
+    ...(options.fetcher === undefined ? {} : { fetcher: options.fetcher }),
+  });
 }
 
 // Limits and pricing resolve from the committed models.dev snapshot
@@ -222,7 +265,6 @@ export async function discoverOpenCodeFreeModels(options: {
 // explicit for both tiers that serve it.
 const sharedZenChat: readonly ModelDefinition[] = [
   defineModel({ id: "big-pickle", providerId: "opencode", wireFamily: "chat", endpoint: `${ZEN_PATH_PREFIX}/chat/completions`, vision: true, reasoning: true }),
-  defineModel({ id: "mimo-v2.5-free", providerId: "opencode", wireFamily: "chat", endpoint: `${ZEN_PATH_PREFIX}/chat/completions`, vision: true, reasoning: true }),
   defineModel({
     id: "mimo-v2.6-flash-free",
     providerId: "opencode",
@@ -282,10 +324,6 @@ export const OPENCODE_FREE_MODELS: readonly ModelDefinition[] = [
 export const OPENCODE_ZEN_MODELS: readonly ModelDefinition[] = [
   ...sharedZenChat,
   defineModel({ id: "nemotron-3-ultra-free", providerId: "opencode", wireFamily: "chat", endpoint: `${ZEN_PATH_PREFIX}/chat/completions`, reasoning: true }),
-  defineModel({ id: "muse-spark-1.2", providerId: "opencode", wireFamily: "responses", endpoint: `${ZEN_PATH_PREFIX}/responses`, vision: true, reasoning: true, reasoningEfforts: MUSE_SPARK_REASONING_EFFORTS }),
-  // Absent from the snapshot: keep the declared limits rather than falling back
-  // to the generic default.
-  defineModel({ id: "muse-spark-1.2-contributor", wireFamily: "responses", endpoint: `${ZEN_PATH_PREFIX}/responses`, ctx: 1048576, out: 131072, vision: true, reasoning: true, reasoningEfforts: MUSE_SPARK_REASONING_EFFORTS }),
   defineModel({ id: "muse-spark-1.2-contributor-free", providerId: "opencode", wireFamily: "responses", endpoint: `${ZEN_PATH_PREFIX}/responses`, vision: true, reasoning: true, reasoningEfforts: MUSE_SPARK_REASONING_EFFORTS }),
   // Served on Zen exactly as its 1.2 sibling is, and declared for the same
   // reason: an id the catalog does not own is left to discovery, which
@@ -294,16 +332,12 @@ export const OPENCODE_ZEN_MODELS: readonly ModelDefinition[] = [
   // for a Responses-only model, and the router dispatched it.
   defineModel({ id: "muse-spark-1.3-contributor-free", providerId: "opencode", wireFamily: "responses", endpoint: `${ZEN_PATH_PREFIX}/responses`, vision: true, reasoning: true, reasoningEfforts: MUSE_SPARK_REASONING_EFFORTS }),
   defineModel({ id: "muse-spark-1.3", providerId: "opencode", wireFamily: "responses", endpoint: `${ZEN_PATH_PREFIX}/responses`, vision: true, reasoning: true, reasoningEfforts: MUSE_SPARK_REASONING_EFFORTS }),
-  defineModel({ id: "ling-3.0-flash-free", providerId: "opencode", wireFamily: "chat", endpoint: `${ZEN_PATH_PREFIX}/chat/completions`, vision: true, reasoning: true }),
   systemoneZen("jev-1.13", false),
 ];
 
 export const OPENCODE_GO_MODELS: readonly ModelDefinition[] = [
   // Absent from the snapshot under `opencode-go`: keep the declared limits.
-  defineModel({ id: "muse-spark-1.2", wireFamily: "responses", endpoint: `${GO_PATH_PREFIX}/responses`, ctx: 1048576, out: 131072, vision: true, reasoning: true }),
   defineModel({ id: "muse-spark-1.2-contributor", providerId: "opencode-go", wireFamily: "responses", endpoint: `${GO_PATH_PREFIX}/responses`, vision: true, reasoning: true }),
-  defineModel({ id: "muse-spark-1.2-contributor-free", providerId: "opencode-go", wireFamily: "responses", endpoint: `${GO_PATH_PREFIX}/responses`, vision: true, reasoning: true }),
-  defineModel({ id: "grok-4.5", providerId: "opencode-go", wireFamily: "chat", endpoint: `${GO_PATH_PREFIX}/chat/completions`, reasoning: true }),
   defineModel({ id: "glm-5.2", providerId: "opencode-go", wireFamily: "chat", endpoint: `${GO_PATH_PREFIX}/chat/completions`, reasoning: true }),
   defineModel({ id: "kimi-k3", providerId: "opencode-go", wireFamily: "chat", endpoint: `${GO_PATH_PREFIX}/chat/completions`, vision: true, reasoning: true }),
   defineModel({ id: "kimi-k2.7-code", providerId: "opencode-go", wireFamily: "chat", endpoint: `${GO_PATH_PREFIX}/chat/completions`, reasoning: true }),

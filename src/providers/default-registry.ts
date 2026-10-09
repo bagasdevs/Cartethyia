@@ -260,7 +260,18 @@ export const PROVIDER_CAPABILITIES = {
     },
     loadAdapter: async () => createApiKeyAdapter((await import("./integrations/opencode")).OPENCODE_ZEN_SPEC),
     loadModels: async () => (await import("./integrations/opencode")).OPENCODE_ZEN_MODELS,
-    loadModelDiscovery: openAIModelDiscovery("opencodezen", { transformBaseUrl: (baseUrl) => `${baseUrl.replace(/\/+$/, "")}/zen/v1`, headers: (credential) => ({ authorization: `Bearer ${credential}` }) }),
+    // The same free-tier-aware read as OpenCode Free, not the generic OpenAI
+    // discovery: Zen serves the free tier from the shared `/zen/v1` base, so a
+    // plain fetch wrote those ids as ordinary discovered rows instead of the
+    // "Free models (auto)" group, and classified each one from its id alone.
+    loadModelDiscovery: async () => async ({ baseUrl, credential, fetcher }) => {
+      const { discoverOpenCodeZenModels } = await import("./integrations/opencode");
+      return discoverOpenCodeZenModels({
+        baseUrl: `${baseUrl.replace(/\/+$/, "")}/zen/v1`,
+        credential,
+        ...(fetcher === undefined ? {} : { fetcher }),
+      });
+    },
   },
   opencodego: {
     // The billed Go tier serves the same two wire families as the shared Zen
