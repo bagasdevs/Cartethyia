@@ -764,6 +764,7 @@ export class ProviderProbingService {
       const { wireFamily, endpointPath } = applyDiscoveredWire({
         resolvedWireFamily: resolved.wireFamily,
         resolvedEndpointPath: resolved.endpointPath,
+        ...(resolved.profileMatched === true ? { profileMatched: true } : {}),
         ...(discDef !== undefined
           ? { discoveredWireFamily: discDef.wireFamily, discoveredEndpointPath: discDef.endpointPath }
           : {}),

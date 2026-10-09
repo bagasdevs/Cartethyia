@@ -66,6 +66,12 @@ export function constrainWireFamily(
 export interface DiscoveredModelWire {
   readonly wireFamily: WireFamily;
   readonly endpointPath: string;
+  /**
+   * Whether the provider's own per-model profile rule chose this family, as
+   * opposed to a default or an id-shaped guess. `applyDiscoveredWire` needs it
+   * to keep the operator's rule ahead of a discovery module's guess.
+   */
+  readonly profileMatched?: boolean;
 }
 
 /**
@@ -109,6 +115,8 @@ export function supportedWireFamiliesForProvider(
 interface DiscoveredWireInput {
   readonly resolvedWireFamily: WireFamily;
   readonly resolvedEndpointPath: string;
+  /** The provider's own per-model rule named `resolvedWireFamily`. */
+  readonly profileMatched?: boolean;
   readonly discoveredWireFamily?: WireFamily;
   readonly discoveredEndpointPath?: string;
   readonly staticEndpoints?: Partial<Record<WireFamily, string>>;
@@ -133,17 +141,27 @@ interface DiscoveredWireInput {
 
 export function applyDiscoveredWire(input: DiscoveredWireInput): DiscoveredModelWire {
   const declared = input.supportedWireFamilies ?? [];
-  // The discovered family only wins when the provider's own contract admits it;
-  // its endpoint travels with it, so an admitted family is what decides whether
-  // the discovered path may be used at all.
+  const admitted = (family: WireFamily): boolean =>
+    declared.length === 0 || declared.includes(family);
+  // The provider's own per-model rule is an operator statement about that
+  // provider, so it outranks a family the discovery module guessed from the
+  // model id. The shared OpenAI fetcher infers `chat`/`responses` from the id
+  // alone and knows nothing about a provider's own families; letting its guess
+  // win wrote a `chat` row for a Responses-only id and dispatch answered
+  // upstream `ModelProtocolUnsupported` on every request. A module that states
+  // its own family (cline ships `/chat/completions`) is still heard whenever
+  // the provider declares no rule for that id.
+  const profileFamily = input.profileMatched === true ? input.resolvedWireFamily : undefined;
   const discoveredFamily =
+    profileFamily === undefined &&
     input.discoveredWireFamily !== undefined &&
-    (declared.length === 0 || declared.includes(input.discoveredWireFamily))
+    admitted(input.discoveredWireFamily)
       ? input.discoveredWireFamily
       : undefined;
   const wireFamily =
+    profileFamily ??
     discoveredFamily ??
-    (declared.length === 0 || declared.includes(input.resolvedWireFamily)
+    (admitted(input.resolvedWireFamily)
       ? input.resolvedWireFamily
       : (declared[0] ?? input.resolvedWireFamily));
 
@@ -171,7 +189,7 @@ export function staticEndpointForWire(
   return catalog.get(providerId)?.find((def) => def.wireFamily === wireFamily)?.endpointPath;
 }
 
-function matchModelWireFamily(
+export function matchModelWireFamily(
   modelId: string,
   rules: ReadonlyArray<{ pattern: string; wire_family: WireFamily }> | undefined,
 ): WireFamily | undefined {
@@ -200,13 +218,15 @@ export function resolveDiscoveredWire(
   discoveryPaths: Partial<Record<WireFamily, string>> | undefined,
   fallbackEndpoints: Record<WireFamily, string>,
 ): DiscoveredModelWire {
-  const wireFamily =
-    matchModelWireFamily(modelId, ctx.modelWireFamilies) ??
-    ctx.wireFamilyDefault ??
-    ("chat" as WireFamily);
+  const profileFamily = matchModelWireFamily(modelId, ctx.modelWireFamilies);
+  const wireFamily = profileFamily ?? ctx.wireFamilyDefault ?? ("chat" as WireFamily);
   const endpointPath =
     ctx.endpointPathsByWireFamily?.[wireFamily] ??
     discoveryPaths?.[wireFamily] ??
     fallbackEndpoints[wireFamily];
-  return { wireFamily, endpointPath };
+  return {
+    wireFamily,
+    endpointPath,
+    ...(profileFamily === undefined ? {} : { profileMatched: true }),
+  };
 }

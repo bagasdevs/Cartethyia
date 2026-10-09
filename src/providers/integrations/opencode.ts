@@ -287,6 +287,12 @@ export const OPENCODE_ZEN_MODELS: readonly ModelDefinition[] = [
   // to the generic default.
   defineModel({ id: "muse-spark-1.2-contributor", wireFamily: "responses", endpoint: `${ZEN_PATH_PREFIX}/responses`, ctx: 1048576, out: 131072, vision: true, reasoning: true, reasoningEfforts: MUSE_SPARK_REASONING_EFFORTS }),
   defineModel({ id: "muse-spark-1.2-contributor-free", providerId: "opencode", wireFamily: "responses", endpoint: `${ZEN_PATH_PREFIX}/responses`, vision: true, reasoning: true, reasoningEfforts: MUSE_SPARK_REASONING_EFFORTS }),
+  // Served on Zen exactly as its 1.2 sibling is, and declared for the same
+  // reason: an id the catalog does not own is left to discovery, which
+  // classifies it from the generic fetcher's id guess (`chat`) instead of this
+  // provider's own `^muse-spark -> responses` rule. That produced a chat row
+  // for a Responses-only model, and the router dispatched it.
+  defineModel({ id: "muse-spark-1.3-contributor-free", providerId: "opencode", wireFamily: "responses", endpoint: `${ZEN_PATH_PREFIX}/responses`, vision: true, reasoning: true, reasoningEfforts: MUSE_SPARK_REASONING_EFFORTS }),
   defineModel({ id: "muse-spark-1.3", providerId: "opencode", wireFamily: "responses", endpoint: `${ZEN_PATH_PREFIX}/responses`, vision: true, reasoning: true, reasoningEfforts: MUSE_SPARK_REASONING_EFFORTS }),
   defineModel({ id: "ling-3.0-flash-free", providerId: "opencode", wireFamily: "chat", endpoint: `${ZEN_PATH_PREFIX}/chat/completions`, vision: true, reasoning: true }),
   systemoneZen("jev-1.13", false),
