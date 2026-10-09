@@ -1,5 +1,5 @@
 /** Durable materialization of bundled provider model metadata. */
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { CartethyiaDatabase } from "../../persistence/postgres";
 import { models } from "../../persistence/schema";
 import type { ModelDefinition } from "../provider-registry";
@@ -11,26 +11,28 @@ export async function seedBundledModels(
 ): Promise<void> {
   for (const [providerId, definitions] of builtinModels) {
     if (definitions.length === 0) continue;
-    // Drop builtin rows the current catalog no longer declares, including rows
-    // whose model id is still present but whose endpoint path drifted (e.g. a
-    // provider that moved from `/chat/completions` to `/v2/chat/completions`).
-    // The unique key is (provider, model, endpoint), so a changed endpoint
-    // would otherwise insert a second row and leave the stale route behind —
-    // the model list would then show duplicates and probes could hit the dead
-    // path. Composite `NOT IN` keeps exactly the (model, endpoint) pairs the
-    // catalog owns.
+    // Drop rows the current catalog no longer declares for these ids.
+    // The unique key is (provider, model, endpoint), so a wire change inserts
+    // a new row and leaves the old one: a model that moved from
+    // `/chat/completions` to `/responses` kept its chat row, and the router
+    // dispatches whichever row the snapshot lists first. That stale row is
+    // not always `builtin` — discovery writes `discovered`/`auto_free` for the
+    // same id — so restricting the delete to `builtin` left it in place and
+    // upstream answered `ModelProtocolUnsupported` on every request.
+    // `manual` is operator-owned and stays. Composite `NOT IN` keeps exactly
+    // the (model, endpoint) pairs the catalog owns.
     const pairs = definitions.map(
       (definition) => sql`(${definition.modelId}, ${definition.endpointPath})`,
     );
-    await db
-      .delete(models)
-      .where(
-        and(
-          eq(models.providerId, providerId),
-          eq(models.source, "builtin"),
-          sql`(${models.modelId}, ${models.endpointPath}) NOT IN (${sql.join(pairs, sql`, `)})`,
-        ),
-      );
+    const ids = definitions.map((definition) => definition.modelId);
+    await db.delete(models).where(
+      and(
+        eq(models.providerId, providerId),
+        inArray(models.modelId, ids),
+        inArray(models.source, ["builtin", "discovered", "auto_free"]),
+        sql`(${models.modelId}, ${models.endpointPath}) NOT IN (${sql.join(pairs, sql`, `)})`,
+      ),
+    );
   }
   const now = new Date();
   const seen = new Set<string>();
