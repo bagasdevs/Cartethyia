@@ -138,7 +138,20 @@ function opencodeSpec(providerId: "opencodeft" | "opencodezen" | "opencodego"): 
     // OpenCode Free is a genuinely public, unauthenticated endpoint. Console
     // account creation still allows any credentialKind for it, so the
     // "never forward" contract is enforced here rather than trusting account config.
-    ...(providerId === "opencodeft" ? { credential_forwarding: "never" as const, prepareRequest: ensureFreeAgentRequest } : {}),
+    ...(providerId === "opencodeft" ? { credential_forwarding: "never" as const } : {}),
+    // The agent fingerprint is per *model*, not per provider: upstream gates the
+    // free-tier ids on the shared `/zen/v1` base, so a `-free` id dispatched
+    // through `opencodezen` is refused exactly like one through `opencodeft`.
+    // Without this hook on Zen, its own catalog rows (`nemotron-3-ultra-free`,
+    // `muse-spark-1.2-contributor-free`, …) could only ever answer 403.
+    ...(providerId === "opencodego"
+      ? {}
+      : {
+          prepareRequest: (request: CanonicalRequest): CanonicalRequest =>
+            providerId === "opencodeft" || isFreeTierZenModel(request.model)
+              ? ensureFreeAgentRequest(request)
+              : request,
+        }),
     prePayload: (payload, request, candidate) => {
       completeOpenCodeToolSchemas(payload);
       if (candidate.wire_family === "responses") {
