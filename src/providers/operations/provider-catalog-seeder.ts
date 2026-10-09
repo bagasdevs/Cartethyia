@@ -11,26 +11,43 @@ export async function seedBundledModels(
 ): Promise<void> {
   for (const [providerId, definitions] of builtinModels) {
     if (definitions.length === 0) continue;
-    // Drop rows the current catalog no longer declares for these ids.
-    // The unique key is (provider, model, endpoint), so a wire change inserts
-    // a new row and leaves the old one: a model that moved from
-    // `/chat/completions` to `/responses` kept its chat row, and the router
-    // dispatches whichever row the snapshot lists first. That stale row is
-    // not always `builtin` — discovery writes `discovered`/`auto_free` for the
-    // same id — so restricting the delete to `builtin` left it in place and
-    // upstream answered `ModelProtocolUnsupported` on every request.
-    // `manual` is operator-owned and stays. Composite `NOT IN` keeps exactly
-    // the (model, endpoint) pairs the catalog owns.
+    // Drop rows the current catalog no longer declares.
+    //
+    // The unique key is `(provider, model, endpoint)`, so a catalog change
+    // leaves the old row behind in two shapes:
+    //   - a retired id: the catalog stopped declaring it, and
+    //   - a drifted endpoint: the id is still declared, on another wire (a
+    //     model that moved `/chat/completions` -> `/responses`).
+    // The router dispatches whichever row the snapshot lists first, so a
+    // leftover row serves a route the catalog no longer owns — the chat row
+    // for a Responses-only model answered upstream
+    // `ModelProtocolUnsupported` on every request.
+    //
+    // `builtin` rows are catalog-owned by definition, so any pair the catalog
+    // does not declare is stale and goes. `discovered`/`auto_free` rows are
+    // only pruned for ids the catalog *does* declare (the shadow row a fetch
+    // wrote on the wrong wire); a discovered row for an undeclared id is a
+    // legitimate fetch result and stays. `manual` is operator-owned.
     const pairs = definitions.map(
       (definition) => sql`(${definition.modelId}, ${definition.endpointPath})`,
     );
-    const ids = definitions.map((definition) => definition.modelId);
+    const pairsNotDeclared = sql`(${models.modelId}, ${models.endpointPath}) NOT IN (${sql.join(pairs, sql`, `)})`;
     await db.delete(models).where(
       and(
         eq(models.providerId, providerId),
-        inArray(models.modelId, ids),
-        inArray(models.source, ["builtin", "discovered", "auto_free"]),
-        sql`(${models.modelId}, ${models.endpointPath}) NOT IN (${sql.join(pairs, sql`, `)})`,
+        eq(models.source, "builtin"),
+        pairsNotDeclared,
+      ),
+    );
+    await db.delete(models).where(
+      and(
+        eq(models.providerId, providerId),
+        inArray(models.source, ["discovered", "auto_free"]),
+        inArray(
+          models.modelId,
+          definitions.map((definition) => definition.modelId),
+        ),
+        pairsNotDeclared,
       ),
     );
   }

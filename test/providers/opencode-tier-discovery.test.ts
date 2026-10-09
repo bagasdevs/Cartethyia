@@ -43,11 +43,16 @@ const LIVE_IDS = [
   "gpt-5.5",
 ];
 
+/** A `fetch`-shaped stub: the signature is what discovery calls, nothing more. */
+function listingFetcher(ids: readonly string[]): typeof fetch {
+  return (async () => listingResponse(ids)) as unknown as typeof fetch;
+}
+
 test("zen marks the free-tier ids and leaves billed ones unmarked", async () => {
   const models = await discoverOpenCodeZenModels({
     baseUrl: "https://opencode.ai/zen/v1",
     credential: "test-key",
-    fetcher: async () => listingResponse(LIVE_IDS),
+    fetcher: listingFetcher(LIVE_IDS),
   });
   expect(models).not.toBeNull();
   const free = (models ?? []).filter((m) => m.freeTier === true).map((m) => m.modelId).sort();
@@ -65,7 +70,7 @@ test("zen marks the free-tier ids and leaves billed ones unmarked", async () => 
 test("the free tier keeps only free ids and reclassifies System One", async () => {
   const models = await discoverOpenCodeFreeModels({
     baseUrl: "https://opencode.ai/zen/v1",
-    fetcher: async () => listingResponse(LIVE_IDS),
+    fetcher: listingFetcher(LIVE_IDS),
   });
   expect(models).not.toBeNull();
   const ids = (models ?? []).map((m) => m.modelId).sort();

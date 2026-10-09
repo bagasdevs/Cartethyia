@@ -63,6 +63,17 @@ test("seeding drops a discovered row on a wire the catalog no longer declares", 
       endpointPath: "/zen/v1/manual",
       source: "manual",
     },
+    // A `builtin` row for an id the catalog stopped declaring: retired
+    // upstream, but still dispatchable until seeding removes it.
+    {
+      providerId: PROVIDER,
+      modelId: "retired-model",
+      wireFamily: "chat",
+      endpointPath: "/zen/v1/chat/completions",
+      source: "builtin",
+    },
+    // A discovered row for an id the catalog never declared is a legitimate
+    // fetch result and must survive.
     {
       providerId: PROVIDER,
       modelId: "kept-discovered",
