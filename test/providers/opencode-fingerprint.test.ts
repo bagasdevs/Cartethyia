@@ -3,6 +3,7 @@ import type { ProviderDispatchContext } from "../../src/providers/provider-contr
 import type { CanonicalRequest } from "../../src/protocol/canonical-model";
 import { encodeWireRequest } from "../../src/protocol/registry";
 import { OPENCODE_FREE_SPEC } from "../../src/providers/integrations/opencode/provider";
+import { generateOpenCodeSessionId } from "../../src/providers/integrations/opencode/fingerprint";
 
 describe("OpenCode request fingerprint", () => {
   test("matches the captured CLI identity and reuses session identity per conversation", async () => {
@@ -74,5 +75,37 @@ describe("OpenCode request fingerprint", () => {
 
     expect(payload["max_completion_tokens"]).toBe(512);
     expect(payload["max_tokens"]).toBeUndefined();
+  });
+
+  /**
+   * The gate decodes the session's time part back into `(ts_ms << 12 | counter)`
+   * and accepts counters 1..63 only. A genuine id therefore always ends in
+   * `f[c-f][0-9a-f]`; anything lower is refused with `403 FreeTierError` even
+   * when the `ses_` shape is right.
+   *
+   * The generator used to let the counter grow without bound. Sixty-four
+   * dispatches inside one millisecond produced ids the gate refuses — and a
+   * burst is exactly what a proxy pool produces, so the pool 403'd on its own
+   * headers while the tools, the stream flag, and the bearer were all correct.
+   */
+  test("no session id falls outside the gate's counter window", () => {
+    const ACCEPTED_TIME_PART = /^[0-9a-f]{9}f[c-f][0-9a-f]$/;
+    const now = 1_792_242_000_000;
+    const ids: string[] = [];
+    for (let index = 0; index < 500; index += 1) ids.push(generateOpenCodeSessionId(now));
+    for (const id of ids) {
+      expect(id.slice(4, 16)).toMatch(ACCEPTED_TIME_PART);
+    }
+    // Rolling into the next millisecond must not collapse ids together.
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  test("the counter resets between milliseconds", () => {
+    const base = 1_792_242_000_000;
+    const first = generateOpenCodeSessionId(base);
+    const later = generateOpenCodeSessionId(base + 5);
+    expect(first.slice(4, 16)).toMatch(/f[c-f][0-9a-f]$/);
+    expect(later.slice(4, 16)).toMatch(/f[c-f][0-9a-f]$/);
+    expect(later).not.toBe(first);
   });
 });

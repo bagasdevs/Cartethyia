@@ -83,6 +83,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- OpenCode session ids are capped at the counter window the free-tier gate
+  accepts. The client's own generator lets the counter grow without bound, so a
+  burst of more than 63 dispatches inside one millisecond produced ids outside
+  the accepted window — and a pool produces exactly that burst. On overflow the
+  timestamp advances one millisecond instead. The bundle trace, the generator,
+  and what is still unverified are recorded in
+  `documentation/archive/opencode-session-identity.md`.
 - The model probe now sends the same request shape a real dispatch does:
   `stream_options.include_usage` is attached, the sampling temperature is no
   longer pinned, and the output allowance is sentence-sized instead of 1024.

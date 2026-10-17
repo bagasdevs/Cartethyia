@@ -1,0 +1,189 @@
+# OpenCode client identity — the session headers, traced from the bundle
+
+> [!IMPORTANT]
+> **The client sends two different session values, not one.** Our adapter sent a
+> single id in all five session headers. That is the defect this document
+> records, alongside the generator it was derived from.
+
+**Date:** 2026-10-17. **Build pinned:** `opencode-cli` 2.0.32, extracted from
+`opencode-desktop-linux-x86_64.rpm` (`D:/tmp/opencode-rpm/extracted/`).
+**Method:** static inspection of the minified bundle. No installer was run.
+
+## The question
+
+OpenCode free-tier dispatches through our adapter intermittently answer
+`403 FreeTierError` while the tools, the stream flag, and the anonymous bearer
+are all correct. What in the request still differs from what the client sends?
+
+## What the client sends
+
+From `SessionModelRequest.prepare` in the CLI bundle, the request headers are
+built in one object:
+
+```js
+fH = IR(h)
+EH = tJ({
+  model: T.model,
+  http: {
+    headers: {
+      "x-opencode-session-id": h.id,
+      ...(h.parentID ? { "x-opencode-parent-session-id": h.parentID } : {}),
+      "x-session-affinity": fH,
+      "X-Session-Id": fH,
+      ...(h.parentID ? { "x-parent-session-id": h.parentID } : {}),
+      "User-Agent": QA(A),
+      "x-opencode-project": h.projectID,
+      "x-opencode-session": fH,
+      "x-opencode-client": A.name,
+    },
+  },
+  promptCacheKey: /^ses_[0-9a-f]{64}$/.test(fH) ? fH.slice(4) : fH,
+  ...
+})
+```
+
+with
+
+```js
+IR = (H) => H.parentID ?? H.fork?.sessionID ?? H.id;
+```
+
+### The two values
+
+| Header | Value | Meaning |
+| --- | --- | --- |
+| `x-opencode-session-id` | `h.id` | **the session's own id** |
+| `x-session-affinity` | `fH` | parent session, or the forked session, or the id |
+| `X-Session-Id` | `fH` | same as affinity |
+| `x-opencode-session` | `fH` | same as affinity |
+| `x-parent-session-id` | `h.parentID` | **only when a parent exists** |
+
+For a top-level session `fH === h.id`, so the two collapse into one value. They
+diverge in exactly the case that matters: a **child or forked session**, where
+affinity points at the parent while `session-id` names the child.
+
+Our adapter emitted one id into all five. For a top-level session that is
+indistinguishable from correct; for anything derived, it claims the child is its
+own parent.
+
+### The project header
+
+`x-opencode-project` is `h.projectID`. The reference gateway notes the free tier
+**refuses canonical `prj_*` ids** and accepts the literal `global` every client
+sends, so a real client's project id is not necessarily what the gate wants. Our
+adapter sends `global` unless the caller supplies one — that part is fine.
+
+### `promptCacheKey`
+
+```js
+promptCacheKey: /^ses_[0-9a-f]{64}$/.test(fH) ? fH.slice(4) : fH
+```
+
+A 64-hex session literal is stripped of its `ses_` prefix; any other shape is
+passed through whole. Note this is the **64-hex** internal form, not the
+26-character wire form.
+
+## The generator
+
+```js
+function Q$e() { return gZ(!0) }
+function gZ(e, n = Date.now()) {
+  if (n !== m) m = n, d = 0;
+  d++;
+  let r = BigInt(n) * 0x1000n + BigInt(d),
+      a = e ? ~r : r,
+      c = Array.from({ length: 6 }, (l, D) =>
+            Number(a >> BigInt(40 - 8 * D) & 0xffn).toString(16).padStart(2, "0")).join(""),
+      s = crypto.getRandomValues(new Uint8Array(F - 12));
+  return c + Array.from(s, (l) => I[l % 62]).join("")
+}
+```
+
+Facts, read off this code rather than assumed:
+
+- The counter `d` **has no upper bound**. It resets when the millisecond
+  changes and otherwise grows without limit.
+- The value is `~(ts_ms << 12 | counter)` when descending, rendered as 6 bytes
+  (12 hex), then 14 base62 characters.
+- `Session.ID` is minted by `e.make("ses_" + Q$e())`, so every session id is
+  `ses_` + 12 hex + 14 base62.
+
+### What this means for the counter cap
+
+The reference gateway (`opencode2api`) caps the counter at 63, and its comment
+claims the gate accepts 1–63 only. **The client does not cap it.** So a cap is a
+deliberate divergence from the client, and two things follow:
+
+1. A cap is only correct if the *gate* rejects high counters — a claim about
+   upstream, not about the client.
+2. Without a cap, a burst of more than 63 dispatches inside one millisecond
+   emits ids whose low 12 bits fall below `0xfc0`. Whether upstream refuses
+   those is **unverified here**; the reference gateway says it does, from live
+   probing.
+
+We capped at 63 and roll into the next millisecond on overflow. That keeps every
+id inside the window the reference reports as accepted, at the cost of ids that
+do not sort exactly as the client's would under a burst. The alternative — match
+the client exactly and emit uncapped counters — is only safe if the gate truly
+accepts them.
+
+**Status of this claim: `unverified`.** It rests on another project's live
+probing, not on our own measurement.
+
+## What our adapter does, and where it differs
+
+`src/providers/integrations/opencode/fingerprint.ts`:
+
+| Aspect | Client | Ours | Verdict |
+| --- | --- | --- | --- |
+| distinct `session-id` vs affinity | yes | **one value in all five** | **defect** |
+| `x-parent-session-id` | when a parent exists | never sent | **missing** |
+| `x-opencode-client` | `A.name` (`cli`) | `desktop` | cosmetic; gate accepts both |
+| `x-opencode-project` | `h.projectID` | `global` unless supplied | intentional |
+| counter cap | none | 63 | divergence, see above |
+| `x-opencode-request` | absent | absent | correct |
+| trace headers | from tracing context | freshly generated per call | acceptable |
+
+### Why "one value in all five" is a real defect and not a nit
+
+The affinity header is what upstream uses to group a conversation for prompt
+caching and for whatever per-session accounting the free tier applies. Sending
+the child's id as its own affinity:
+
+- splits a forked conversation into two unrelated sessions upstream, losing
+  cache affinity — the thing the header exists for;
+- makes a child look like a root, so any per-session limit the gate applies is
+  counted against the wrong identity.
+
+For a top-level session — which is every dispatch our adapter currently
+produces, because nothing sets a parent — the two values are identical, so the
+bug is **latent, not active**. It becomes active the moment anything routes a
+derived session through this adapter.
+
+## Corrections to earlier notes
+
+The capture document (`documentation/archive/opencode-freetier-replay.md`)
+records the four session headers as carrying the *same* id. That is true of the
+captured top-level session and was generalised from it. The bundle shows the
+general rule: they are equal only when no parent exists.
+
+## What is still unknown
+
+- Whether the gate actually rejects counters above 63. Only the reference
+  gateway asserts it.
+- Whether the gate compares `x-opencode-session-id` against affinity at all, or
+  merely uses affinity for cache grouping. The bundle proves what the *client*
+  sends; it says nothing about what upstream checks.
+- Whether `x-opencode-client: desktop` versus `cli` matters. Earlier probing says
+  both are accepted; the bundle's `A.name` is the client's own name, which for
+  the CLI is `cli`.
+
+## Next evidence needed
+
+1. Replay a dispatch with `session-id` and affinity deliberately different, from
+   an allowed egress, and observe whether the gate accepts it. That is the only
+   way to learn whether the distinction is enforced.
+2. Replay 64+ ids minted inside one millisecond and observe the status of the
+   later ones. That settles the counter cap.
+3. Only then change the adapter. A diff against another client's source is a
+   hypothesis, not evidence.

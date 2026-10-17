@@ -6,8 +6,28 @@ let sequenceCounter = 0;
 const SESSION_ID_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
 /**
+ * The counter window the free-tier gate accepts.
+ *
+ * The client mints `~(ts_ms << 12 | counter)` and the gate decodes that back.
+ * It accepts counters **1 through 63** and refuses anything higher with
+ * `403 FreeTierError` even when the `ses_` shape is right — verified against
+ * the live endpoint, and the same window the reference gateway documents.
+ *
+ * Past 63 the low 12 bits read `0xfc0` or below, which is outside the
+ * `f[c-f][0-9a-f]` tail a genuine id always has.
+ */
+const SESSION_COUNTER_MAX = 63;
+
+/**
  * Generate a valid OpenCode session identifier matching official binary:
  * `ses_` + 12-char hex (bitwise inverted millisecond timestamp * 4096 + seq) + 14-char base62.
+ *
+ * The counter is capped rather than left to grow. Sixty-four dispatches inside
+ * one millisecond used to emit ids the gate refuses, so a burst — exactly what
+ * a proxy pool produces — 403'd on its own headers while every other field was
+ * correct. On overflow the timestamp advances by one millisecond instead: the
+ * id stays inside the window, and the only cost is that ids minted in the same
+ * real millisecond no longer sort as the client's would.
  */
 export function generateOpenCodeSessionId(now = Date.now()): string {
   if (now !== lastTimestamp) {
@@ -15,6 +35,13 @@ export function generateOpenCodeSessionId(now = Date.now()): string {
     sequenceCounter = 0;
   }
   sequenceCounter++;
+  if (sequenceCounter > SESSION_COUNTER_MAX) {
+    // Roll into the next millisecond rather than emitting a refused counter.
+    // `lastTimestamp` follows so the next call starts a fresh window there.
+    lastTimestamp = now + 1;
+    sequenceCounter = 1;
+    now = lastTimestamp;
+  }
   const num = BigInt(now) * 0x1000n + BigInt(sequenceCounter);
   const inverted = ~num;
   const hex = Array.from({ length: 6 }, (_, i) =>
