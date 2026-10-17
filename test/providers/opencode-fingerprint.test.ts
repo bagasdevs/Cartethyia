@@ -3,7 +3,7 @@ import type { ProviderDispatchContext } from "../../src/providers/provider-contr
 import type { CanonicalRequest } from "../../src/protocol/canonical-model";
 import { encodeWireRequest } from "../../src/protocol/registry";
 import { OPENCODE_FREE_SPEC } from "../../src/providers/integrations/opencode/provider";
-import { generateOpenCodeSessionId } from "../../src/providers/integrations/opencode/fingerprint";
+import { canonicalProjectId, generateOpenCodeSessionId } from "../../src/providers/integrations/opencode/fingerprint";
 
 describe("OpenCode request fingerprint", () => {
   test("matches the captured CLI identity and reuses session identity per conversation", async () => {
@@ -29,7 +29,10 @@ describe("OpenCode request fingerprint", () => {
     expect(first["x-opencode-session-id"]).toBe(first["x-opencode-session"]);
     expect(first["x-session-affinity"]).toBe(first["x-opencode-session"]);
     expect(first["x-session-id"]).toBe(first["x-opencode-session"]);
-    expect(first["x-opencode-project"]).toBe("stable-project-hash");
+    // The captured 2.x dispatch carries 40 hex here, not a name. A caller's
+    // project identity is hashed into that shape; an already-canonical value is
+    // kept as-is.
+    expect(first["x-opencode-project"]).toMatch(/^[0-9a-f]{40}$/);
     expect(first["user-agent"]).toMatch(/^opencode\/latest\/\d+\.\d+\.\d+\/cli$/);
     const traceparent = first["traceparent"];
     const b3 = first["b3"];
@@ -107,5 +110,17 @@ describe("OpenCode request fingerprint", () => {
     expect(first.slice(4, 16)).toMatch(/f[c-f][0-9a-f]$/);
     expect(later.slice(4, 16)).toMatch(/f[c-f][0-9a-f]$/);
     expect(later).not.toBe(first);
+  });
+
+  test("the project header is 40 hex, and a canonical value is preserved", () => {
+    // The captured 2.x dispatch carries `82b484de...` — 40 hex, not a name.
+    // Sending "global" was a guess that passed one probe, not the client's
+    // shape, and the gate fingerprints this header beside the session id.
+    const canonical = "82b484de3985b491abf573de7d60d7999302b858";
+    expect(canonicalProjectId(canonical)).toBe(canonical);
+    expect(canonicalProjectId("stable-project-hash")).toMatch(/^[0-9a-f]{40}$/);
+    expect(canonicalProjectId(undefined)).toMatch(/^[0-9a-f]{40}$/);
+    // Distinct projects must not collide.
+    expect(canonicalProjectId("a")).not.toBe(canonicalProjectId("b"));
   });
 });

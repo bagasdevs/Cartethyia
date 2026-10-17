@@ -139,7 +139,7 @@ probing, not on our own measurement.
 | distinct `session-id` vs affinity | yes | **one value in all five** | **defect** |
 | `x-parent-session-id` | when a parent exists | never sent | **missing** |
 | `x-opencode-client` | `A.name` (`cli`) | `desktop` | cosmetic; gate accepts both |
-| `x-opencode-project` | `h.projectID` | `global` unless supplied | intentional |
+| `x-opencode-project` | `h.projectID` (40 hex) | hashed to 40 hex | **fixed** |
 | counter cap | none | 63 | divergence, see above |
 | `x-opencode-request` | absent | absent | correct |
 | trace headers | from tracing context | freshly generated per call | acceptable |
@@ -187,3 +187,46 @@ general rule: they are equal only when no parent exists.
    later ones. That settles the counter cap.
 3. Only then change the adapter. A diff against another client's source is a
    hypothesis, not evidence.
+
+## Addendum — the project header
+
+The captured 2.x dispatch carries:
+
+```
+x-opencode-project: 82b484de3985b491abf573de7d60d7999302b858
+```
+
+40 hex, not a name. Our adapter sent the literal `"global"` — a value that
+passed one earlier probe, but which is not the shape the client produces. The
+reference gateway (`opencode2api`) reaches the same conclusion from its own
+probing and renders the header as `sha256(project)[:20]` hex, noting that the
+free tier **refuses canonical `prj_*` ids** while accepting the 40-hex form.
+
+We now do the same: a caller's project identity is hashed into 40 hex, and an
+already-canonical value is preserved rather than re-hashed.
+
+### Why "global" was not obviously wrong
+
+It passed a live probe on 2026-10-14, so it looked correct. A value that is
+accepted is not the same as a value that is sent — the gate may tolerate several
+shapes while fingerprinting only one. Treating "this passed" as "this is the
+client's value" is how a guess becomes a constant.
+
+## Addendum — what the reference gateway does differently, and why it is not proof
+
+`opencode2api` sets `x-opencode-session`, `x-session-affinity`, `X-Session-Id`,
+and `x-opencode-session-id` all to the **same** derived id, with a comment
+saying the newer gate "wants both session headers set to the same
+descending-encoded id".
+
+That contradicts the bundle, which builds them from two expressions
+(`h.id` versus `IR(h)`). Both can be true: the gate may accept one value in all
+five for a top-level session — which is every session a stateless gateway
+produces, because it has no parent to derive from — while the client still
+distinguishes them for its own forked sessions.
+
+So the reference is evidence that **one value works**, not evidence that the
+distinction is irrelevant. Our adapter keeps one value for now: it produces only
+top-level sessions, where the two expressions are identical by definition. The
+distinction becomes load-bearing only if we ever forward a parent relationship,
+and at that point the bundle is the authority.

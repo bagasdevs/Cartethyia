@@ -83,6 +83,27 @@ function stableOpenCodeSessionId(affinity: string): string {
   return `ses_${hex}${suffix}`;
 }
 
+/**
+ * Render a project identity in the 40-hex shape the client sends.
+ *
+ * The captured 2.x dispatch carries `x-opencode-project:
+ * 82b484de3985b491abf573de7d60d7999302b858` — 40 hex, not a name. Sending the
+ * literal `"global"` is a guess that happened to pass during an earlier probe;
+ * it is not the shape the client produces, and the free-tier gate fingerprints
+ * this header alongside the session id.
+ *
+ * An already-canonical 40-hex value is kept: a caller that resolved one is
+ * describing its own project, and re-hashing it would replace a real identity
+ * with a hash of that identity.
+ */
+export function canonicalProjectId(project: string | undefined): string {
+  if (project !== undefined && /^[0-9a-f]{40}$/.test(project)) return project;
+  const digest = createHash("sha256")
+    .update(`opencode-project\u0000${project ?? "cartethyia"}`)
+    .digest();
+  return digest.subarray(0, 20).toString("hex");
+}
+
 function isOpenCodeSessionId(value: string | undefined): value is string {
   return value !== undefined && /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/.test(value);
 }
@@ -124,7 +145,7 @@ export function buildOpenCodeHeaders(
     // live 2026-10-14 — identical request returns 403 with it, 200 without).
     // The id generator was removed with it; this header is simply not part of
     // the dispatch identity anymore.
-    "x-opencode-project": projectId ?? "global",
+    "x-opencode-project": canonicalProjectId(projectId),
     "user-agent": `opencode/latest/${version}/cli`,
     ...createTraceHeaders(),
   };
