@@ -83,6 +83,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- More of the OpenCode gate is measured, mostly as things it does **not**
+  check: prompt size, 20-turn history, a system turn, `temperature`, `top_p`, a
+  missing token cap, absent or malformed trace headers, and `x-opencode-request`
+  all answer 200. `/zen/v1` answers `429 FreeUsageLimitError` rather than the 403
+  the capture records — the lane is alive and rate-limited. Volume is not the
+  trigger either: 12 sequential and 8 concurrent dispatches through fresh
+  proxies all answered 200.
 - The OpenCode free-tier tool threshold is measured at **3**, not the 10–11 the
   archived capture recorded: 0/1/2 tools answer `403`, and 3 through 13 all
   answer `200`. Streaming remains mandatory (`stream: false` → 403). We still

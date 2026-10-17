@@ -404,3 +404,66 @@ outright.
 
 Two of the eight fields this document was built on have moved. That is the
 argument for treating a capture as a snapshot with a date, not as a contract.
+
+## What the gate does *not* check
+
+Measured on fresh egresses. Each row is a dispatch that answered **200**, so the
+variation is tolerated rather than merely untested.
+
+| Variation | Result |
+| --- | --- |
+| prompt of 8,000 characters | 200 |
+| 20-turn conversation | 200 |
+| a `system` turn prepended | 200 |
+| `temperature: 0.2` | 200 |
+| `top_p: 0.9` | 200 |
+| no `max_completion_tokens` | 200 |
+| trace headers absent | 200 |
+| trace headers malformed (`traceparent: garbage`) | 200 |
+| `x-opencode-request` present | **200** — no longer refused |
+| 8 concurrent dispatches | 200 all |
+| 12 sequential dispatches | 200 all |
+
+Two of these contradict the capture outright:
+
+- **`x-opencode-request` no longer breaks `/inference`.** The capture records it
+  as flipping an otherwise-200 request to 403. It does not, today. We still do
+  not send it — the client does not, and there is no reason to reintroduce a
+  header that once mattered.
+- **Trace headers are not validated.** We generate `traceparent`/`b3` per call;
+  the gate accepts them absent or malformed, so their content is free.
+
+## The `/zen/v1` lane answers 429, not 403
+
+| Endpoint | Result |
+| --- | --- |
+| `/inference/v1/chat/completions` | 200 |
+| `/zen/v1/chat/completions` | **429 `FreeUsageLimitError`** |
+
+The capture records `/zen/v1` as refused with 403 for the free tier. Today that
+lane is alive and rate-limited, which is a different fact: a 429 means the lane
+accepted the request and the allowance is spent. It says nothing about the
+request shape.
+
+We stay on `/inference/v1` — it is the lane the current client uses, and the one
+that answers 200 for a free dispatch.
+
+## Volume is not what triggers a refusal
+
+Twelve sequential dispatches through one fresh proxy, then eight concurrent
+through another, all answered 200. So a burst is not by itself what retires an
+address.
+
+That leaves the observation that started this investigation unexplained rather
+than solved: five proxies used repeatedly during a long session ended up
+answering 403 to requests identical to the ones five new proxies accepted. Two
+candidate explanations remain, and this document does not choose between them:
+
+1. The gate accumulates something per address over a longer horizon than a
+   dozen requests — a daily or per-hour allowance on the *address*, distinct
+   from the per-request checks above.
+2. Those particular proxies were already retired for reasons outside this
+   gateway's traffic.
+
+Distinguishing them needs the same proxy measured across hours, or an address
+whose history is known before it is used. Neither was available here.

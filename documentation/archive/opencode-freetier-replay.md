@@ -154,6 +154,12 @@ Evidence: `opencode-freetier-capture.log` (the raw capture, headers and body).
 > `403 FreeTierError`. Check the IP before bisecting anything:
 > [`.skills/cartethyia-trace-replay/references/opencode-free-tier.md`](../../.skills/cartethyia-trace-replay/references/opencode-free-tier.md).
 
+> [!WARNING]
+> **Re-measured 2026-10-17: this no longer holds.** `x-opencode-request` on the
+> `/inference` lane answers **200**, not 403. The header stays out of our
+> adapter because the client does not send it, but it is no longer a refusal.
+> See [`opencode-session-identity.md`](./opencode-session-identity.md#what-the-gate-does-not-check).
+
 ### `x-opencode-request` actively breaks the dispatch
 
 Isolated last, and the single most surprising result: adding the request id to
