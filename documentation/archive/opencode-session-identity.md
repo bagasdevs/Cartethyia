@@ -467,3 +467,71 @@ candidate explanations remain, and this document does not choose between them:
 
 Distinguishing them needs the same proxy measured across hours, or an address
 whose history is known before it is used. Neither was available here.
+
+## The header set is far smaller than we send
+
+Dropping one header at a time from the full set, every single one answers 200 —
+**including `authorization`**. Only `user-agent` is load-bearing on its own.
+
+| Dropped header | Result |
+| --- | --- |
+| `content-type` | 200 |
+| `x-opencode-client` | 200 |
+| `x-opencode-session` | 200 |
+| `x-opencode-session-id` | 200 |
+| `x-session-affinity` | 200 |
+| `x-session-id` | 200 |
+| `x-opencode-project` | 200 |
+| `traceparent` | 200 |
+| `b3` | 200 |
+| **`authorization`** | **200** |
+| `accept` | 200 |
+| **`user-agent`** | **403** |
+
+Each header is individually redundant, which is not the same as being
+unnecessary: the gate requires a *set*, and removing any one member leaves the
+others satisfying it.
+
+### What the set actually is
+
+| Headers present | Result |
+| --- | --- |
+| UA only | **403** |
+| UA + `content-type` | **403** |
+| UA + `authorization` | **403** |
+| UA + `accept` | **403** |
+| UA + `x-opencode-session` | **200** |
+| UA + `x-session-affinity` | **200** |
+| UA + `x-session-id` | **200** |
+| UA + `x-opencode-session-id` | **403** |
+| UA + `x-opencode-session` + anything else | 200 |
+| all session headers, no UA | **403** |
+
+So the minimum is **`user-agent` plus at least one of
+`x-opencode-session` / `x-session-affinity` / `x-session-id`**. The other two
+session headers — including `x-opencode-session-id`, the one whose value the
+client derives separately — do not satisfy the check on their own.
+
+That is a genuine asymmetry, and it is the first evidence about *which* header
+the gate reads: it reads one of the three affinity-style names, not the
+`session-id` one.
+
+### The session value is validated, not just present
+
+| Value | Result |
+| --- | --- |
+| `ses_<valid descending layout>` | 200 |
+| `not-a-session` | **403** |
+| empty | **403** |
+
+So the header must be present **and** carry a well-formed session id. Presence
+alone is not enough — which is why the earlier "drop one header" sweep, where
+the remaining headers still held a valid id, could not distinguish these cases.
+
+### What this means for us
+
+We send all five session headers plus the UA. That is a superset of the
+minimum, and it is the right thing to keep sending: the client sends all of
+them, and this adapter's job is to look like the client. The measurements matter
+for the opposite reason — they show which single header a future change must not
+drop, and they explain a 403 that would otherwise look like an address problem.

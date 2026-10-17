@@ -83,6 +83,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- The OpenCode gate's minimum header set is measured: **`user-agent` plus one
+  of `x-opencode-session`, `x-session-affinity`, or `x-session-id`**. Every other
+  header — including `authorization` — is individually droppable without a
+  refusal, but `x-opencode-session-id` alone does not satisfy the check, and the
+  session value must be a well-formed `ses_` id (`not-a-session` and empty both
+  answer 403). We keep sending the client's full set; the finding is about which
+  header a change must not drop.
 - More of the OpenCode gate is measured, mostly as things it does **not**
   check: prompt size, 20-turn history, a system turn, `temperature`, `top_p`, a
   missing token cap, absent or malformed trace headers, and `x-opencode-request`
