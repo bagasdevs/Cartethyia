@@ -83,6 +83,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- The OpenCode free-tier refusal was measured against five fresh egresses: the
+  session counter window is **1–63** (64 and above answer `403 FreeTierError`),
+  the 64-hex internal session literal is refused, and `x-opencode-client`,
+  the session-id/affinity split, and three project-header shapes all pass. The
+  refusal therefore follows the egress address, not the request. Recorded in
+  `documentation/archive/opencode-session-identity.md`.
 - `x-opencode-project` is sent as 40 hex, hashed from the project identity, in
   the shape the 2.x client emits. The literal `global` was a value that passed
   one probe, not the client's own shape, and the gate fingerprints this header

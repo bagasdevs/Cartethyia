@@ -230,3 +230,72 @@ distinction is irrelevant. Our adapter keeps one value for now: it produces only
 top-level sessions, where the two expressions are identical by definition. The
 distinction becomes load-bearing only if we ever forward a parent relationship,
 and at that point the bundle is the authority.
+
+## Measured 2026-10-17 — the open questions, answered
+
+Run from five fresh egresses that all answered `200` on the same dispatch, so
+every result below is about the header, not the address.
+
+### The counter window is real, and the cap is correct
+
+| Counter | Time part | Result |
+| --- | --- | --- |
+| 1 | `eb532e04bffe` | **200** |
+| 63 | `eb532e04bfc0` | **200** |
+| 64 | `eb532e04bfbf` | **403 FreeTierError** |
+| 100 | `eb532e04bf9b` | **403** |
+| 4095 | `eb532e04b000` | **403** |
+
+The boundary is exactly where the reference gateway said it was: **1–63
+accepted, 64 and above refused**. This was previously recorded as another
+project's claim; it is now our own measurement, and the cap in
+`generateOpenCodeSessionId` is what keeps a burst from crossing it.
+
+### The session shape is enforced, the value is not
+
+| Variation | Result |
+| --- | --- |
+| baseline (our headers) | 200 |
+| `x-opencode-client: cli` instead of `desktop` | 200 |
+| 64-hex internal session literal | **403** |
+| `x-opencode-session-id` ≠ affinity, with parent headers | 200 |
+| `x-parent-session-id` present | 200 |
+
+So the gate checks the **shape** — `ses_` + 12 hex in the descending layout +
+14 base62 — and does not care whether `session-id` equals affinity, nor whether
+a parent header is present. The bundle's distinction is real for the client's
+own bookkeeping, but nothing upstream enforces it.
+
+That closes the item left open earlier: our adapter sending one id in all five
+is **not** a defect the gate can see. It stays a latent correctness issue for
+cache affinity if we ever forward a parent relationship, not a 403 cause.
+
+### The project header is not validated in any of the forms we tried
+
+| Variation | Result |
+| --- | --- |
+| 40-hex (our current value) | 200 |
+| literal `global` | 200 |
+| header absent entirely | 200 |
+
+The reference gateway's claim that canonical `prj_*` ids are refused was not
+re-tested, but every other shape passed. The 40-hex form is still what we send:
+it is what the client produces, and matching the client is the safer default
+even where the gate is indifferent.
+
+### What this rules out
+
+The intermittent `403`s are **not** caused by:
+
+- the session counter (capped, and the cap matches the measured window);
+- `x-opencode-client` (`desktop` and `cli` both pass);
+- the session-id/affinity split (not enforced);
+- the project header shape (three shapes pass).
+
+What remains, and is consistent with the observed pattern — some proxies work
+and others refuse the same dispatch — is that the refusal follows the **egress
+address**. Five fresh proxies answered 200 on the first try; the earlier set,
+used repeatedly during testing, answered 403 to the identical request.
+
+That is the conclusion the free-tier reference already reached, now measured
+here: the gate checks the IP first and independently of the request.
