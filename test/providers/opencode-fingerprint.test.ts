@@ -23,7 +23,9 @@ describe("OpenCode request fingerprint", () => {
     const first = await buildHeaders(context);
     const second = await buildHeaders(context);
 
-    expect(first["x-opencode-client"]).toBe("desktop");
+    // "cli" is the identity every source agrees on: the captured 2.x dispatch,
+    // the local 2.0.26 CLI captures, and the reference gateway.
+    expect(first["x-opencode-client"]).toBe("cli");
     expect(first["x-opencode-session"]).toMatch(/^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/);
     expect(second["x-opencode-session"]).toBe(first["x-opencode-session"]);
     expect(first["x-opencode-session-id"]).toBe(first["x-opencode-session"]);

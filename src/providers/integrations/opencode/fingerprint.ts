@@ -133,9 +133,12 @@ export function buildOpenCodeHeaders(
     sessionId = generateOpenCodeSessionId();
   }
   return {
-    // The free-tier gate accepts both "cli" and "desktop" (verified live), but
-    // "desktop" matches the identity the observed free-tier traffic carries.
-    "x-opencode-client": "desktop",
+    // The gate accepts both "cli" and "desktop" (measured 2026-10-17), so this
+    // is not a refusal either way. It is "cli" because that is what the client
+    // actually sends: the captured 2.x dispatch, the local 2.0.26 CLI captures,
+    // and the reference gateway all carry "cli". Sending "desktop" claimed a
+    // client identity this adapter does not have, for no measured benefit.
+    "x-opencode-client": "cli",
     "x-opencode-session": sessionId,
     "x-opencode-session-id": sessionId,
     "x-session-affinity": sessionId,

@@ -83,6 +83,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- The OpenCode dispatch identity now sends `x-opencode-client: cli`, matching the
+  captured 2.x dispatch, the local 2.0.26 CLI captures and the reference
+  gateway. It previously sent `desktop` on the strength of a code comment that
+  no source in the archive supports. The gate accepts both, so this was never a
+  refusal — it was the adapter claiming a client identity it does not have.
 - The OpenCode gate's minimum header set is measured: **`user-agent` plus one
   of `x-opencode-session`, `x-session-affinity`, or `x-session-id`**. Every other
   header — including `authorization` — is individually droppable without a

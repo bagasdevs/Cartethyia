@@ -535,3 +535,69 @@ minimum, and it is the right thing to keep sending: the client sends all of
 them, and this adapter's job is to look like the client. The measurements matter
 for the opposite reason — they show which single header a future change must not
 drop, and they explain a 403 that would otherwise look like an address problem.
+
+## Three sources, compared header by header
+
+The client capture, the reference gateway (`opencode2api`, Go), and our adapter
+disagree in ways worth writing down. Each row was sent live on 2026-10-17
+through a fresh egress.
+
+| Header | Real client (capture) | Reference gateway | Ours (before) | Ours (now) |
+| --- | --- | --- | --- | --- |
+| `authorization` | `Bearer public` | `Bearer <key>`, `public` for free | `Bearer public` on free only | unchanged |
+| `content-type` | `application/json` | `application/json` | `application/json` | unchanged |
+| `accept` | `*/*` | `application/json, text/event-stream` | `text/event-stream` (free) | unchanged |
+| `user-agent` | `opencode/latest/cli` *(stale)* | `opencode/latest/<ver>/cli` | `opencode/latest/<ver>/cli` | unchanged |
+| `x-opencode-client` | `cli` | `cli` | **`desktop`** | **`cli`** |
+| `x-opencode-session` | `ses_…` | `ses_…` | `ses_…` | unchanged |
+| `x-opencode-session-id` | `ses_…` | `ses_…` | `ses_…` | unchanged |
+| `x-session-affinity` | `ses_…` | `ses_…` | `ses_…` | unchanged |
+| `x-session-id` | `ses_…` | `ses_…` | `ses_…` | unchanged |
+| `x-opencode-project` | 40 hex | 40 hex | 40 hex | unchanged |
+| `b3` / `traceparent` | present | not sent | present (random) | unchanged |
+| `x-opencode-request` | **absent** | absent on `/inference` | absent | unchanged |
+| `x-parent-session-id` | absent | only when forked | absent | unchanged |
+| `connection` / `accept-encoding` | `keep-alive` / gzip… | Go defaults | runtime defaults | unchanged |
+
+All three sets answered **200**. The differences are therefore about matching
+the client, not about passing the gate.
+
+### The one real divergence: `x-opencode-client`
+
+We sent `desktop`. Every source says `cli`:
+
+- the captured 2.x dispatch: `"x-opencode-client": "cli"`;
+- the local 2.0.26 CLI captures recorded in
+  [`opencode-cache-replay.md`](./opencode-cache-replay.md): `cli`;
+- the reference gateway: `req.Header.Set("x-opencode-client", "cli")`.
+
+The old code comment claimed `desktop` "matches the identity the observed
+free-tier traffic carries". Nothing in the archive supports that, and the
+capture file in the same directory contradicts it. The gate accepts both, so
+this was never a 403 — it was an adapter claiming to be a client it is not.
+Now `cli`, matching all three sources.
+
+### Where we deliberately keep a difference
+
+- **`accept: text/event-stream`** — the client sends `*/*`; the reference sends
+  both types. Ours is narrower, which is honest: we only ever want SSE, and
+  `stream: false` is refused anyway. Both other values measured 200.
+- **`traceparent` / `b3`** — we generate them per call and the gate does not
+  validate them (absent or `garbage` both pass). The reference sends neither.
+  Kept because the client sends them and they cost nothing.
+- **No `x-opencode-request`** — all three agree.
+
+### Two reference claims our measurements contradict
+
+| Reference says | Measured 2026-10-17 |
+| --- | --- |
+| keyless dispatch is refused (403) | **no `authorization` answers 200** on three egresses |
+| `Bearer PUBLIC` 401s (case-sensitive) | **confirmed** — `Bearer PUBLIC` and `Bearer garbage` both 401 |
+| canonical `prj_*` project ids are refused on `/inference` | **`prj_<24hex>` answers 200** |
+| `x-opencode-request` is rejected on `/inference` | **answers 200** |
+
+The `authorization` row is the surprising one. A *wrong* credential is rejected
+with 401 — so the header is read when present — but an *absent* one passes. That
+is consistent with the gate treating `public` as the anonymous default rather
+than as a credential it requires. We keep sending it because all three sources
+do, and because the free tier may tighten again.
