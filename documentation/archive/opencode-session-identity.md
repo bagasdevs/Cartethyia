@@ -299,3 +299,108 @@ used repeatedly during testing, answered 403 to the identical request.
 
 That is the conclusion the free-tier reference already reached, now measured
 here: the gate checks the IP first and independently of the request.
+
+## The User-Agent — measured, and it contradicts the capture
+
+The captured dispatch carries `user-agent: opencode/latest/cli`. Sending that
+exact value today answers **403 FreeTierError**. Adding a version segment makes
+the identical request answer 200.
+
+| User-Agent | Result |
+| --- | --- |
+| `opencode/latest/cli` (the capture's value) | **403 FreeTierError** |
+| `opencode/latest/2.0.32/cli` (ours) | 200 |
+| `opencode/2.0.32/cli` | 200 |
+| `opencode/latest/2.0.26/cli` | 200 |
+| `opencode/1.18.31/cli` | 200 |
+| `opencode/latest/99.99.99/cli` | 200 |
+| `curl/8.0` | 403 |
+| empty | 403 |
+| `opencode/latest/0.0.1/cli` | **426 UpgradeRequired** |
+| `opencode/latest/1.0.0/cli` | **426 UpgradeRequired** |
+| `opencode/latest/1.18.0/cli` | 200 |
+
+Reproduced on three independent fresh egresses, so it is the header and not the
+address.
+
+The 426 body states the rule outright:
+
+```json
+{"type":"error","error":{"type":"UpgradeRequired",
+ "message":"OpenCode 1.18.0 or newer is required to use the free tier"}}
+```
+
+### What this means
+
+- The UA must be `opencode/<channel>/<version>/cli` with a **version segment**.
+  `opencode/latest/cli` has two segments where three are expected, and the gate
+  refuses it as a 403 rather than explaining.
+- The version floor is **1.18.0**. Below it the gate says so politely with 426.
+- Above the floor the exact number does not matter: 1.18.0, 1.18.31, 2.0.26,
+  2.0.32 and 99.99.99 all pass.
+- The capture is **stale on this field**. It was taken from a client that sent
+  the two-segment form, and upstream has since tightened to three. This is the
+  clearest example yet of why a captured value is evidence about one moment,
+  not a constant.
+
+Our adapter already sends the three-segment form
+(`opencode/latest/<version>/cli`), so no change is needed. The finding matters
+because the capture document tells a reader to match `opencode/latest/cli`
+exactly — following it today would produce a 403 that looks like an IP block.
+
+### Not the cause of the intermittent 403s
+
+Our UA already had the version segment, and the old egresses refused it while
+the fresh ones accepted the identical header. So the UA is a real rule, but it
+is not what separates a working proxy from a blocked one.
+
+## The tool set — the capture's threshold is stale too
+
+The capture records that 10–11 of the client's 13 tools are required and that a
+five-tool subset is refused. Measured today on fresh egresses, that is wrong:
+
+| Tools sent | Result |
+| --- | --- |
+| 0 | **403** |
+| 1 | **403** |
+| 2 | **403** |
+| 3 | 200 |
+| 4 | 200 |
+| 5 | 200 |
+| 9 | 200 |
+| 11 | 200 |
+| 12 | 200 |
+| 13 | 200 |
+
+The floor is **3**, not 10. The gate checks that the request is agent-shaped,
+not that it carries the client's exact roster.
+
+We still send all 13. The floor being lower is a fact about the gate, not an
+invitation to send less: the whole point of this adapter is to look like the
+client, and the client sends its full set.
+
+### And streaming is still mandatory
+
+| Body | Result |
+| --- | --- |
+| `stream: true` | 200 |
+| `stream: false` | **403** |
+
+Unchanged from the capture. The gate refuses a non-streamed free dispatch
+outright.
+
+## What the capture got right, and what has drifted
+
+| Claim in the capture | Status today |
+| --- | --- |
+| `Authorization: Bearer public` required | **still true** |
+| base URL `/inference/v1` | **still true** |
+| `stream: true` required | **still true** |
+| four session headers required | **still true** |
+| full 10–11 tool set required | **stale — floor is 3** |
+| `user-agent: opencode/latest/cli` | **stale — needs a version segment** |
+| `x-opencode-request` must be absent | still true |
+| `/zen/v1` refused | not re-tested |
+
+Two of the eight fields this document was built on have moved. That is the
+argument for treating a capture as a snapshot with a date, not as a contract.

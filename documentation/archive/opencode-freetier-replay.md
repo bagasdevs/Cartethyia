@@ -79,7 +79,7 @@ x-opencode-session:      ses_ec50fdea1ffe9DeKoTBUAi615X
 x-opencode-session-id:   ses_ec50fdea1ffe9DeKoTBUAi615X
 x-session-affinity:      ses_ec50fdea1ffe9DeKoTBUAi615X
 x-session-id:            ses_ec50fdea1ffe9DeKoTBUAi615X
-user-agent:         opencode/latest/cli
+user-agent:         opencode/latest/cli   ← STALE: see the note below
 b3 / traceparent:   present
 body: model, messages[{role:"system"}, {role:"user"}], stream, tools
 ```
@@ -120,11 +120,28 @@ Isolated by dropping one field at a time from the captured request:
 | `x-opencode-project: global` instead of the 40-hex hash | **200** (not decisive) |
 | `instructions`, `prompt_cache_key`, `include`, `max_output_tokens` dropped | **200** (not required) |
 
+> [!WARNING]
+> **The `user-agent` in this capture no longer works.** Measured 2026-10-17 on
+> three fresh egresses: `opencode/latest/cli` answers `403 FreeTierError`, while
+> the three-segment `opencode/latest/<version>/cli` answers `200`. The gate now
+> requires a version segment and a floor of **1.18.0** — below it the upstream
+> answers `426 UpgradeRequired` with the message "OpenCode 1.18.0 or newer is
+> required to use the free tier". Above the floor the exact number is
+> indifferent. See
+> [`opencode-session-identity.md`](./opencode-session-identity.md#the-user-agent--measured-and-it-contradicts-the-capture).
+
+> [!WARNING]
+> **The tool threshold below is stale.** Measured 2026-10-17 on fresh egresses,
+> the floor is **3 tools**, not 10: 0/1/2 answer `403 FreeTierError`, and 3
+> through 13 all answer `200`. Streaming is still mandatory (`stream: false`
+> → 403). See
+> [`opencode-session-identity.md`](./opencode-session-identity.md#the-tool-set--the-captures-threshold-is-stale-too).
+
 **Required:** `Authorization: Bearer public`; base URL
 `https://opencode.ai/inference/v1`; `stream: true`; the four session headers;
-and a **full agent tool set** — at least 10 of the client's 11
-(`edit, glob, grep, read, shell, skill, subagent, webfetch, websearch, write,
-execute`). A five-tool subset (`bash, edit, glob, grep, read`) is **not enough**.
+and an **agent tool set** — at least 3 at the time of the 2026-10-17
+measurement, though this capture recorded a floor of 10 and the client sends all
+13.
 
 **Not required:** real instructions, `prompt_cache_key`, `include`,
 `max_output_tokens`, a hashed project id, or `x-opencode-client: cli`.

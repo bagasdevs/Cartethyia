@@ -83,6 +83,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- The OpenCode free-tier tool threshold is measured at **3**, not the 10–11 the
+  archived capture recorded: 0/1/2 tools answer `403`, and 3 through 13 all
+  answer `200`. Streaming remains mandatory (`stream: false` → 403). We still
+  send the client's full 13 — the lower floor is a fact about the gate, not a
+  reason to send less.
+- OpenCode's free-tier User-Agent rule is measured: the gate requires
+  `opencode/<channel>/<version>/cli` with a **version segment** and a floor of
+  **1.18.0**. `opencode/latest/cli` — the value the archived capture records —
+  now answers `403 FreeTierError`, and anything below the floor answers
+  `426 UpgradeRequired` with the upstream's own explanation. Above the floor the
+  exact number is indifferent (1.18.0 through 99.99.99 all pass). Our adapter
+  already sends the three-segment form; the capture document now carries a
+  warning so nobody follows it into a 403.
 - The OpenCode free-tier refusal was measured against five fresh egresses: the
   session counter window is **1–63** (64 and above answer `403 FreeTierError`),
   the 64-hex internal session literal is refused, and `x-opencode-client`,
