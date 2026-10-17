@@ -83,6 +83,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- The OpenCode archive is reorganised around one canonical document,
+  `documentation/archive/opencode-free-tier.md`: the measured contract, the two
+  failures that look identical (shape vs egress), a runnable replay recipe, a
+  dated timeline, a corrections ledger of every claim this investigation got
+  wrong, and what is still open. The other documents are now marked as history
+  or method and link to it, and their stale values are corrected in place.
 - The OpenCode dispatch identity now sends `x-opencode-client: cli`, matching the
   captured 2.x dispatch, the local 2.0.26 CLI captures and the reference
   gateway. It previously sent `desktop` on the strength of a code comment that

@@ -1,5 +1,16 @@
 # OpenCode client identity — the session headers, traced from the bundle
 
+> [!NOTE]
+> **Part one (the bundle trace) is reference; part two (the measurements) is
+> superseded.** Sections up to "What our adapter does" describe what the
+> *client* emits and remain accurate. Everything from "Measured 2026-10-17"
+> onward is the working log that produced the current contract; the contract
+> itself is stated once, in
+> [`opencode-free-tier.md`](./opencode-free-tier.md).
+>
+> This document is still the place to read the generator, the counter window,
+> `promptCacheKey`, and the `parentID ?? fork?.sessionID ?? id` derivation.
+
 > [!IMPORTANT]
 > **The client sends two different session values, not one.** Our adapter sent a
 > single id in all five session headers. That is the defect this document

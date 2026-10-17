@@ -1,5 +1,14 @@
 # OpenCode free-tier replay — `big-pickle`
 
+> [!WARNING]
+> **Historical (2026-10-14), corrected 2026-10-18.** This document records how
+> the first 200 OK was reached and how the client was captured. **Three of the
+> values it establishes no longer pass**: the `user-agent`, the tool threshold,
+> and the `x-opencode-request` refusal. Do not follow it as a contract.
+>
+> The current contract, the replay recipe, and the corrections ledger live in
+> [`opencode-free-tier.md`](./opencode-free-tier.md).
+
 > [!NOTE]
 > **200 OK reached.** The anonymous free tier answers at
 > `POST https://opencode.ai/inference/v1/chat/completions` with
@@ -86,10 +95,11 @@ body: model, messages[{role:"system"}, {role:"user"}], stream, tools
 
 Three corrections this forces, all previously wrong in this investigation:
 
-- **`Bearer public` is required, not a placeholder.** An earlier pass recorded
-  it as inert; that was wrong — it only looked inert because other fields were
-  wrong at the same time.
-- **`x-opencode-client` must be `cli`.** The adapter sends `desktop`.
+- **`Bearer public` is the client's value, but not a requirement.** An earlier
+  pass recorded it as inert; a later one recorded it as required. Both were
+  measured badly. Absent answers 200; *wrong* answers 401.
+- **`x-opencode-client` must be `cli`.** The adapter used to send `desktop`; it
+  now sends `cli`, matching every source. The gate accepts either.
 - **`x-opencode-project` must be a 40-hex hash**, not the literal `global`.
 
 The session id is 26 chars (`ses_` + 12 hex + 14 base62) with a descending
@@ -137,14 +147,15 @@ Isolated by dropping one field at a time from the captured request:
 > → 403). See
 > [`opencode-session-identity.md`](./opencode-session-identity.md#the-tool-set--the-captures-threshold-is-stale-too).
 
-**Required:** `Authorization: Bearer public`; base URL
-`https://opencode.ai/inference/v1`; `stream: true`; the four session headers;
-and an **agent tool set** — at least 3 at the time of the 2026-10-17
-measurement, though this capture recorded a floor of 10 and the client sends all
-13.
+**Required (as of 2026-10-18):** a three-segment `user-agent` with a version
+≥ 1.18.0; `stream: true`; at least **3** tools; and **one** affinity header
+carrying a well-formed `ses_` id. `Authorization: Bearer public` is sent but not
+required — an absent header answers 200, while a *wrong* one answers 401.
 
 **Not required:** real instructions, `prompt_cache_key`, `include`,
-`max_output_tokens`, a hashed project id, or `x-opencode-client: cli`.
+`max_output_tokens`, a hashed project id, `x-opencode-client`, `accept`,
+`content-type`, `x-opencode-request`, or the trace pair. The full table is in
+[`opencode-free-tier.md`](./opencode-free-tier.md#1-the-contract).
 
 Evidence: `opencode-freetier-capture.log` (the raw capture, headers and body).
 
@@ -476,9 +487,11 @@ it is not a block on our address alone, and it is not a malformed-payload 4xx.
 **Solved.** The free tier is reachable without a credential: it is an
 anonymous lane gated on the *shape* of the request, not on a secret. Replay
 returned 200 with output `PONG` once all five defects below were corrected
-together. The gate checks base URL, the anonymous `Authorization` sentinel, the
-agent tool set, and the session headers — and refuses outright when
-`x-opencode-request` is present.
+together. The gate checks the base URL, the User-Agent shape, the streaming flag, the
+tool count, and the presence of a well-formed session id. It does **not**
+require the `Authorization` sentinel and does **not** refuse
+`x-opencode-request` — both were believed at the time and are corrected in
+[`opencode-free-tier.md`](./opencode-free-tier.md).
 
 The earlier "credential is bound to runtime state, replay cannot work"
 conclusion was wrong: it was drawn while four independent fields were still
@@ -488,6 +501,11 @@ wrong, and single-variable bisecting can never expose that.
 
 These are the mismatches against the observed client dispatch. All of the first
 four are **required** for a 200; each alone leaves the request at 403.
+
+> Status 2026-10-18: items 1 and 3 below are **no longer requirements** — an
+> absent `Authorization` answers 200, and `x-opencode-request` answers 200. They
+> were genuinely blocking at the time because other fields were also wrong.
+> Item 2's threshold is 3, not 10. Kept as written to preserve the history.
 
 0. **Wrong base URL.** `provider.ts` built `${ZEN_PATH_PREFIX}/responses`
    (`/zen/v1/...`), which returns 403 for every free model. The lane that
@@ -562,4 +580,5 @@ Two corrections to the sections above:
 - **`x-opencode-request` is lane-specific.** It breaks the `/inference` lane
   (as this document proves) and is *required* on the legacy `/zen/v1` lane.
 
-Current contract: [`.skills/cartethyia-trace-replay/references/opencode-free-tier.md`](../../.skills/cartethyia-trace-replay/references/opencode-free-tier.md).
+Current contract: [`opencode-free-tier.md`](./opencode-free-tier.md).
+Agent-facing summary: [`.skills/cartethyia-trace-replay/references/opencode-free-tier.md`](../../.skills/cartethyia-trace-replay/references/opencode-free-tier.md).
